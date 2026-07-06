@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: compass
+      POSTGRES_PASSWORD: compass
+      POSTGRES_DB: compass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compass"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: compass
+      MINIO_ROOT_PASSWORD: compass-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  api:
+    build: ./backend
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+    environment: &backend-env
+      DATABASE_URL: postgresql+psycopg://compass:compass@postgres:5432/compass
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+    ports:
+      - "8300:8000"  # 宿主 8000 常被占用
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["app"]
+
+  worker:
+    build: ./backend
+    command: celery -A app.tasks.celery_app worker -l info
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["app"]
+
+  beat:
+    build: ./backend
+    command: celery -A app.tasks.celery_app beat -l info
+    environment: *backend-env
+    depends_on:
+      - redis
+    profiles: ["app"]
+
+volumes:
+  pgdata:
+  miniodata:

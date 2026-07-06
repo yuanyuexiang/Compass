@@ -10,10 +10,25 @@
 
 ## 项目状态
 
-⚠️ **本项目处于早期规划阶段，目前仅包含产品文档，尚未开始编码。**
+**V1 全链路已跑通**：多平台采集（中国政府采购网 + 江苏公共资源交易平台）→ AI 十二字段提取（DeepSeek）→ 企业能力匹配（三级漏斗 + 六项风险分析）→ 商机推荐与订阅通知 → Web 管理后台（Next.js）。实测记录与遗留项见 [tech-design.md](tech-design.md) 附录 D–G。
 
-- 无源代码、无构建系统、无测试、暂未初始化 Git 仓库。
-- 技术栈尚未确定；开始开发前需先选型并搭建项目脚手架。
+技术栈：Python 3.12 / FastAPI / Celery + PostgreSQL 16 (pgvector) + Redis + MinIO；LLM 为 DeepSeek v4（经 LiteLLM）；前端 Next.js 15 + Ant Design 5。
+
+### 快速开始
+
+```bash
+docker compose up -d postgres redis minio   # 基础设施
+cd backend
+uv sync && uv run pytest                    # 安装依赖并跑测试
+cp ../.env.example .env                     # 填入 DEEPSEEK_API_KEY
+uv run python scripts/dev_seed.py           # 种子租户（账号 admin / admin123）
+uv run python scripts/dev_crawl.py --adapter ccgp --limit 3    # 真实采集
+uv run python scripts/dev_extract.py        # AI 结构化提取
+uv run python scripts/dev_match.py          # 匹配 + 推荐 + 通知
+uv run uvicorn app.api.main:app --port 8300 # API → http://localhost:8300/docs
+
+cd ../frontend && npm install && npm run dev   # 管理后台 → http://localhost:3000
+```
 
 ---
 

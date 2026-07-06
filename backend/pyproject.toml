@@ -1,0 +1,50 @@
+[project]
+name = "compass-backend"
+version = "0.1.0"
+description = "Project Compass（司南）— AI 寻标 Agent 后端"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0.30",
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.3",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "celery[redis]>=5.4",
+    "httpx>=0.28",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.2",
+    "pymupdf>=1.24",
+    "python-docx>=1.1",
+    "litellm>=1.60",
+    "minio>=7.2",
+    "pyjwt>=2.13.0",
+    "bcrypt>=5.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/ai/prompts/*" = ["E501"]  # Prompt 为自然语言长文本，不折行

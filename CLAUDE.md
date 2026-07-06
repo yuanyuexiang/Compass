@@ -6,49 +6,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-这是一个**尚未开始编码的空白仓库（greenfield）**。目前仓库中只有文档：[prd.md](prd.md)（中文产品说明书）、[tech-design.md](tech-design.md)（技术方案，待评审）和 [README.md](README.md)。当前情况：
+**V1 全链路已跑通**：采集（ccgp + 江苏公共资源两源）→ 清洗/附件 → DeepSeek 十二字段提取 → 发布 → 三级漏斗匹配（规则→[向量]→LLM 评分卡+六项风险）→ 订阅通知（站内信实测）→ Next.js 管理后台（7 页面）。产品需求见 [prd.md](prd.md)，技术方案见 [tech-design.md](tech-design.md)（架构/选型问题先查它；附录 D–G 是实测记录与遗留项清单，**开工前必读附录 G**）。
 
-- **没有任何源代码** —— 未编写任何应用、模块或脚本。
-- **没有构建系统** —— 没有 `package.json`、`pyproject.toml`、`go.mod`、`Makefile` 等。
-- **没有测试、Lint 或 CI 配置。**
-- **不是 Git 仓库** —— 尚未执行 `git init`。
+密钥在 `backend/.env`（已 gitignore）：DEEPSEEK_API_KEY 已配；SILICONFLOW_API_KEY 未配 → 向量化自动跳过、匹配退化为二级漏斗，配上即恢复三级。
 
-当被要求开始开发时，第一步通常是**初始化项目脚手架**。不要假设已存在任何 build/test/run 命令 —— 它们都需要新建。技术选型已在 [tech-design.md](tech-design.md) 中提出（Python/FastAPI + Celery + PostgreSQL/pgvector + Next.js，LLM 为 DeepSeek），前端框架与首批采集平台已获用户确认；动手搭脚手架前请核对其 §13 决策点中仍标注待定的事项。
+## 常用命令
 
-## 产品背景（来自 [prd.md](prd.md)）
+后端（`backend/` 下，uv 管理 Python 3.12）：
 
-**产品名称：** AI 寻标 Agent（Tender Intelligence Agent），开发代号 **Project Compass（司南）**。
-
-面向中国招投标/政企采购市场的 AI 商机智能平台。系统自动从多个采购平台采集招标公告，利用大模型对内容进行提取与结构化，将商机与企业能力画像进行匹配，对高价值项目评分推荐，并推送通知。产品定位是**帮助企业发现商机的 AI 销售助手**，而非传统招标信息聚合网站。
-
-领域为中国市场招投标采购，数据、需求、界面均以中文为主。关键领域术语：招标（tender/bidding）、商机（business opportunity）、投标（bid submission）、企业能力画像（company capability profile）、匹配度（match score）、废标风险（bid-rejection risk）。
-
-### 核心处理流程（需要构建的主干架构）
-
-```
-招标网站 → 自动采集 → 数据清洗 → 附件解析（PDF/Word + OCR）
-  → AI 理解 → 结构化数据 → 企业能力匹配 → 商机评分
-  → 消息通知 → 销售跟进
+```bash
+uv sync                                        # 安装依赖
+uv run pytest                                  # 全部测试（29 个）
+uv run pytest tests/test_matching.py::test_rule_filter_region   # 单个测试
+uv run ruff check app tests scripts            # Lint（提交前必须通过）
+uv run uvicorn app.api.main:app --port 8300    # API（本机 8000 被占用）
+uv run celery -A app.tasks.celery_app worker -l info   # Worker（beat 同理）
+uv run python scripts/dev_seed.py              # 种子租户+admin账号（admin/admin123）
+uv run python scripts/dev_crawl.py --adapter ccgp --limit 3   # 采集演练（ccgp/jsggzy）
+uv run python scripts/dev_extract.py --limit 3 # AI 提取演练
+uv run python scripts/dev_match.py             # 发布+匹配+通知演练
 ```
 
-### 规划模块（说明书 §8）
+前端（`frontend/` 下）：`npm install && npm run dev`（端口 3000，`NEXT_PUBLIC_API_BASE` 指后端，默认 http://localhost:8300）；`npm run build` 必须零错误。
 
-数据采集 · 文档解析 · OCR · AI 理解 · 企业知识库 · 向量检索 · 商机分析 · 推荐引擎 · 通知中心 · Web 管理后台。
+基础设施（根目录）：`docker compose up -d postgres redis minio`。建表用 `init_db()`（dev_seed 自动调）；Alembic 迁移是待办。
 
-上述模块与流程定义了系统的"整体架构"。项目脚手架搭建后，应据此合理放置新代码。
+本机开发注意：这台机器的代理会对部分站点做 HTTPS 中间人/fake-IP 拦截——采集报 `CERTIFICATE_VERIFY_FAILED` 时用 `CRAWLER_VERIFY_SSL=false`（仅本机）；deal.ggzy.gov.cn 与江苏政采域名本机不可达（198.18.x），相关适配器须在生产网络开发。
 
-### 产品路线图（§10）—— 决定功能实现的优先顺序
+## 架构要点（改代码前必读）
 
-- **V1（寻标 Agent）：** 多平台采集、AI 信息解析、企业能力匹配、商机推荐、消息通知。*（当前目标）*
-- **V2（投标 Agent）：** 招标文件解析、AI 评分分析、自动生成投标方案、风险识别。
-- **V3（商机智能体）：** 企业知识图谱、历史中标分析、客户画像、竞争对手分析、商机预测、多 Agent 协同决策。
+- **公共层/租户层分离**：`models/public.py`（公告只处理一次，全租户共享）vs `models/tenant.py`（画像/匹配/订阅/通知，均含 tenant_id）。租户隔离由 `core/security.py` 的 JWT 依赖注入强制——租户层查询必须过滤 `current.tenant_id`。
+- **流水线状态机**：`crawled → cleaned → attachments_parsed → ai_extracted → embedded → published`（+failed），发布后 fan-out 到各租户匹配。业务逻辑写成纯函数 `run_*(session,...)`，Celery 任务只是薄包装（`tasks/pipeline.py`）。
+- **新增采集平台**：`crawler/adapters/` 写 SourceAdapter 子类 + `@register` + 在 `adapters/__init__.py` import；解析逻辑放可离线测试的静态方法，用真实页面 fixture 写测试。适配器内置限速，**不得绕过**；只采官方公开源（合规红线见 tech-design §10.4）。
+- **LLM 约定**：直接用 LiteLLM（入口 `ai/llm_config.py`），模型 `deepseek-v4-flash`（旧模型名已弃用）。Prompt 一律放 `ai/prompts/` 版本化（该目录豁免行长 lint）。**对 LLM 输出做宽容解析**（历史教训：模型会把字符串字段包成 {value,...} 对象且重试不自愈）——见 `ai/schemas.py`、`matching/schemas.py` 的 field_validator。
+- **匹配三级漏斗**（`matching/engine.py`）：规则（画像 data.filter）→ 向量（无 embedding 自动跳过）→ LLM 评分卡。评分卡含 match_score/star/advice/reasons/六项风险。
+- **通知**（`notify/`）：站内信必写兜底，外部渠道（email/企微/钉钉/飞书）按 Subscription.channels 配置驱动，单渠道失败不影响其他。
 
-除非用户另有说明，新工作应优先限定在 V1 功能范围内。
+## 产品背景速览
 
-### 实现时需要保留的关键业务要求
-
-- **企业级隔离（多租户）：** 每家企业拥有独立的知识库与能力画像，因此推荐结果因租户而异。多租户应作为一等公民设计。
-- **AI 匹配而非关键词搜索：** 推荐来自大模型/语义匹配对企业能力画像的计算，而非关键词过滤。需支持自然语言搜索（例如："查找江苏省预算超过300万的 AI 项目"）。
-- **附件理解：** 必须解析 PDF/Word 附件（OCR 兜底）并结构化，而不仅仅是保存链接。
-- **风险分析输出：** 识别是否限制品牌、是否存在排他性条件、是否需要特殊资质、是否预算不足、是否竞争激烈、是否存在废标风险，并输出参与建议。
-- **多渠道通知：** 邮件、企业微信、微信、钉钉、飞书、Web 消息。
+**AI 寻标 Agent**（Project Compass/司南）：中国招投标 AI 商机平台。V1=寻标（当前），V2=投标，V3=商机智能体（prd.md §10）。核心业务要求：AI 语义匹配而非关键词、附件解析（OCR 兜底）、风险分析出参与建议、AI 结论必须附原文 evidence 与置信度、多租户推荐结果各异。界面与数据以中文为主。

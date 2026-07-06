@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# 环境与密钥
+.env
+
+# Node（M4 frontend）
+node_modules/
+.next/
+
+# IDE / OS
+.DS_Store
+.idea/
