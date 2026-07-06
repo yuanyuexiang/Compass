@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **没有测试、Lint 或 CI 配置。**
 - **不是 Git 仓库** —— 尚未执行 `git init`。
 
-当被要求开始开发时，第一步通常是**初始化项目脚手架**。不要假设已存在任何 build/test/run 命令 —— 它们都需要新建。技术选型已在 [tech-design.md](tech-design.md) 中提出（Python/FastAPI + Celery + PostgreSQL/pgvector + Vue3，LLM 为 DeepSeek），但**尚未经用户最终确认**；动手搭脚手架前请确认该方案（尤其其 §13 决策点）已获认可。
+当被要求开始开发时，第一步通常是**初始化项目脚手架**。不要假设已存在任何 build/test/run 命令 —— 它们都需要新建。技术选型已在 [tech-design.md](tech-design.md) 中提出（Python/FastAPI + Celery + PostgreSQL/pgvector + Next.js，LLM 为 DeepSeek），前端框架与首批采集平台已获用户确认；动手搭脚手架前请核对其 §13 决策点中仍标注待定的事项。
 
 ## 产品背景（来自 [prd.md](prd.md)）
 
