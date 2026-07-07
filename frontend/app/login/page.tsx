@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { App, Button, Card, Form, Input, Typography } from 'antd';
+import { App, Button, Card, Divider, Form, Input, Typography } from 'antd';
 import { CompassOutlined, LockOutlined, UserOutlined } from '@ant-design/icons';
 import { apiFetch, getToken, setSession } from '@/lib/api';
 import type { LoginResponse } from '@/lib/types';
@@ -39,35 +39,44 @@ export default function LoginPage() {
   };
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#f0f2f5',
-      }}
-    >
-      <Card style={{ width: 380 }}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <Typography.Title level={3} style={{ marginBottom: 4 }}>
-            <CompassOutlined /> 司南 · AI 寻标 Agent
+    <div className="compass-login-bg">
+      <Card
+        style={{
+          width: 400,
+          borderRadius: 16,
+          zIndex: 1,
+          boxShadow: '0 8px 40px rgba(15, 27, 61, 0.35)',
+        }}
+        styles={{ body: { padding: '36px 32px 28px' } }}
+      >
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <CompassOutlined style={{ fontSize: 48, color: '#FAAD14' }} />
+          <Typography.Title level={3} style={{ margin: '12px 0 4px' }}>
+            司南 · AI 寻标 Agent
           </Typography.Title>
-          <Typography.Text type="secondary">招投标商机智能推荐平台</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            AI 主动发现商机
+          </Typography.Text>
         </div>
-        <Form<LoginForm> layout="vertical" onFinish={onFinish}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
+        <Form<LoginForm> layout="vertical" onFinish={onFinish} size="large">
+          <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
             <Input prefix={<UserOutlined />} placeholder="用户名" autoComplete="username" />
           </Form.Item>
-          <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
+          <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
             <Input.Password prefix={<LockOutlined />} placeholder="密码" autoComplete="current-password" />
           </Form.Item>
-          <Form.Item style={{ marginBottom: 0 }}>
-            <Button type="primary" htmlType="submit" block loading={loading}>
-              登录
+          <Form.Item style={{ marginBottom: 8 }}>
+            <Button type="primary" htmlType="submit" block loading={loading} style={{ height: 44, fontSize: 15 }}>
+              登 录
             </Button>
           </Form.Item>
         </Form>
+        <Divider plain style={{ margin: '12px 0' }} />
+        <div style={{ textAlign: 'center' }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            演示账号：admin / admin123
+          </Typography.Text>
+        </div>
       </Card>
     </div>
   );

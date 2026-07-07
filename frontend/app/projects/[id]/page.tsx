@@ -5,28 +5,50 @@ import { useParams } from 'next/navigation';
 import {
   Alert,
   Card,
+  Col,
   Collapse,
   Descriptions,
   Empty,
   List,
   Progress,
+  Row,
+  Skeleton,
   Space,
-  Spin,
-  Table,
   Tag,
   Typography,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import { FileTextOutlined, LinkOutlined } from '@ant-design/icons';
+import { FileTextOutlined, LinkOutlined, WarningOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
 import { FIELD_LABELS } from '@/lib/labels';
 import type { FieldValue, ProjectDetail } from '@/lib/types';
 
-interface FieldRow {
-  key: string;
-  label: string;
-  field: FieldValue | undefined;
+function FieldBlock({ label, field }: { label: string; field: FieldValue | undefined }) {
+  const conf = typeof field?.confidence === 'number' ? field.confidence : null;
+  const low = conf !== null && conf < 0.7;
+  return (
+    <div style={{ padding: '12px 14px', background: '#FAFBFD', borderRadius: 10, height: '100%' }}>
+      <div style={{ fontSize: 13, color: 'rgba(0, 0, 0, 0.45)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 14, color: 'rgba(0, 0, 0, 0.88)', wordBreak: 'break-all' }}>{field?.value ?? '-'}</div>
+      {conf !== null ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+          <Progress
+            percent={Math.round(conf * 100)}
+            size="small"
+            strokeColor={low ? '#FAAD14' : '#2F54EB'}
+            style={{ maxWidth: 140, marginBottom: 0 }}
+          />
+          {low ? (
+            <span style={{ fontSize: 12, color: '#D48806', whiteSpace: 'nowrap' }}>
+              <WarningOutlined style={{ marginRight: 3 }} />
+              低置信
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {field?.evidence ? <div className="evidence-quote">依据：{field.evidence}</div> : null}
+    </div>
+  );
 }
 
 export default function ProjectDetailPage() {
@@ -49,60 +71,27 @@ export default function ProjectDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const fieldRows: FieldRow[] = FIELD_LABELS.map(([key, label]) => ({
-    key,
-    label,
-    field: data?.project?.fields?.[key],
-  }));
-
-  const columns: ColumnsType<FieldRow> = [
-    { title: '字段', dataIndex: 'label', key: 'label', width: 110 },
-    {
-      title: '内容',
-      key: 'value',
-      render: (_, row) => (
-        <div>
-          <div>{row.field?.value ?? '-'}</div>
-          {row.field?.evidence ? (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              依据：{row.field.evidence}
-            </Typography.Text>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      title: '置信度',
-      key: 'confidence',
-      width: 160,
-      render: (_, row) => {
-        if (!row.field || typeof row.field.confidence !== 'number') return '-';
-        const c = row.field.confidence;
-        return (
-          <Progress
-            percent={Math.round(c * 100)}
-            size="small"
-            strokeColor={c < 0.7 ? '#faad14' : '#52c41a'}
-          />
-        );
-      },
-    },
-  ];
-
   return (
-    <AppLayout>
+    <AppLayout title="项目详情" subtitle="公告原文与 AI 结构化解析结果">
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 64 }}>
-          <Spin size="large" />
-        </div>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Card className="compass-card">
+            <Skeleton active paragraph={{ rows: 2 }} />
+          </Card>
+          <Card className="compass-card">
+            <Skeleton active paragraph={{ rows: 8 }} />
+          </Card>
+        </Space>
       ) : error ? (
         <Alert type="error" showIcon message="项目详情加载失败" description={error} />
       ) : !data ? (
-        <Empty description="未找到该项目" />
+        <Card className="compass-card">
+          <Empty description="未找到该项目" />
+        </Card>
       ) : (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Card>
-            <Typography.Title level={4} style={{ marginTop: 0 }}>
+          <Card className="compass-card">
+            <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 12 }}>
               {data.announcement.title}
             </Typography.Title>
             <Descriptions size="small" column={{ xs: 1, sm: 2, md: 4 }}>
@@ -111,7 +100,7 @@ export default function ProjectDetailPage() {
               <Descriptions.Item label="发布时间">{data.announcement.publish_time ?? '-'}</Descriptions.Item>
               <Descriptions.Item label="原文链接">
                 {data.announcement.url ? (
-                  <a href={data.announcement.url} target="_blank" rel="noreferrer">
+                  <a href={data.announcement.url} target="_blank" rel="noreferrer" style={{ color: '#2F54EB' }}>
                     <LinkOutlined /> 查看原文
                   </a>
                 ) : (
@@ -122,11 +111,12 @@ export default function ProjectDetailPage() {
           </Card>
 
           <Card
-            title="结构化信息"
+            className="compass-card"
+            title="AI 结构化信息"
             extra={
               data.project?.category ? (
                 <Space size={4}>
-                  {data.project.category.main ? <Tag color="blue">{data.project.category.main}</Tag> : null}
+                  {data.project.category.main ? <Tag color="geekblue">{data.project.category.main}</Tag> : null}
                   {data.project.category.sub ? <Tag>{data.project.category.sub}</Tag> : null}
                 </Space>
               ) : null
@@ -135,26 +125,30 @@ export default function ProjectDetailPage() {
             {data.project ? (
               <>
                 {data.project.summary ? (
-                  <Typography.Paragraph type="secondary">{data.project.summary}</Typography.Paragraph>
+                  <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
+                    {data.project.summary}
+                  </Typography.Paragraph>
                 ) : null}
-                <Table<FieldRow>
-                  rowKey="key"
-                  columns={columns}
-                  dataSource={fieldRows}
-                  pagination={false}
-                  size="small"
-                />
+                <Row gutter={[12, 12]}>
+                  {FIELD_LABELS.map(([key, label]) => (
+                    <Col xs={24} md={12} key={key}>
+                      <FieldBlock label={label} field={data.project?.fields?.[key]} />
+                    </Col>
+                  ))}
+                </Row>
               </>
             ) : (
-              <Empty description="该公告尚未完成 AI 结构化解析" />
+              <Empty description="该公告尚未完成 AI 结构化解析，解析完成后自动展示" />
             )}
           </Card>
 
           <Collapse
+            className="compass-card"
+            style={{ background: '#fff' }}
             items={[
               {
                 key: 'clean_text',
-                label: '公告正文全文',
+                label: <Typography.Text strong>公告正文全文</Typography.Text>,
                 children: data.announcement.clean_text ? (
                   <pre
                     style={{
@@ -162,6 +156,8 @@ export default function ProjectDetailPage() {
                       wordBreak: 'break-all',
                       margin: 0,
                       fontFamily: 'inherit',
+                      fontSize: 13,
+                      color: 'rgba(0, 0, 0, 0.65)',
                       maxHeight: 480,
                       overflow: 'auto',
                     }}
@@ -175,7 +171,7 @@ export default function ProjectDetailPage() {
             ]}
           />
 
-          <Card title="附件列表">
+          <Card className="compass-card" title="附件列表">
             {data.attachments?.length ? (
               <List
                 size="small"
@@ -183,10 +179,14 @@ export default function ProjectDetailPage() {
                 renderItem={(att) => (
                   <List.Item>
                     <Space>
-                      <FileTextOutlined />
+                      <FileTextOutlined style={{ color: '#2F54EB' }} />
                       <Typography.Text>{att.filename}</Typography.Text>
                       <Tag>{att.status}</Tag>
-                      {att.needs_ocr ? <Tag color="orange">需 OCR</Tag> : null}
+                      {att.needs_ocr ? (
+                        <Tag color="warning" icon={<WarningOutlined />}>
+                          需 OCR
+                        </Tag>
+                      ) : null}
                     </Space>
                   </List.Item>
                 )}

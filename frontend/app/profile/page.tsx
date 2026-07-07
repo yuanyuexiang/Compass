@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, App, Button, Card, Col, Divider, Form, Input, InputNumber, Row, Select, Spin } from 'antd';
+import { Alert, App, Button, Card, Col, Form, Input, InputNumber, Row, Select, Skeleton, Space } from 'antd';
+import { SaveOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
 import type { ProfileData } from '@/lib/types';
@@ -63,68 +64,94 @@ export default function ProfilePage() {
   };
 
   return (
-    <AppLayout>
-      <Card title="企业能力画像">
-        {error ? (
-          <Alert
-            type="warning"
-            showIcon
-            message="画像加载失败，可直接填写后保存"
-            description={error}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 48 }}>
-            <Spin />
-          </div>
-        ) : (
-          <Form<ProfileData> form={form} layout="vertical" onFinish={onFinish}>
-            <Row gutter={24}>
-              <Col xs={24} md={12}>
-                <Form.Item name="name" label="企业名称" rules={[{ required: true, message: '请输入企业名称' }]}>
-                  <Input placeholder="企业全称" />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Form.Item name="description" label="企业简介">
-              <Input.TextArea rows={3} placeholder="企业主营业务、核心能力简述" />
-            </Form.Item>
-            <Row gutter={24}>
-              {TAG_FIELDS.map((f) => (
-                <Col xs={24} md={12} key={f.name}>
-                  <Form.Item name={f.name} label={f.label}>
-                    <Select mode="tags" placeholder={f.placeholder} open={false} suffixIcon={null} tokenSeparators={[',', '，']} />
+    <AppLayout title="企业能力画像" subtitle="画像越完整，AI 匹配越精准">
+      {error ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="画像加载失败，可直接填写后保存"
+          description={error}
+          style={{ marginBottom: 16 }}
+        />
+      ) : null}
+      {loading ? (
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Card className="compass-card">
+            <Skeleton active paragraph={{ rows: 3 }} />
+          </Card>
+          <Card className="compass-card">
+            <Skeleton active paragraph={{ rows: 4 }} />
+          </Card>
+        </Space>
+      ) : null}
+      {/* Form 始终挂载（加载时隐藏），避免 useForm 实例未连接的警告 */}
+      <div style={{ display: loading ? 'none' : undefined }}>
+        <Form<ProfileData> form={form} layout="vertical" onFinish={onFinish}>
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Card className="compass-card" title="基本信息">
+              <Row gutter={24}>
+                <Col xs={24} md={12}>
+                  <Form.Item name="name" label="企业名称" rules={[{ required: true, message: '请输入企业名称' }]}>
+                    <Input placeholder="企业全称" />
                   </Form.Item>
                 </Col>
-              ))}
-            </Row>
-            <Form.Item name="cases_text" label="典型案例（文本）">
-              <Input.TextArea rows={4} placeholder="过往项目案例描述，用于 AI 匹配参考" />
-            </Form.Item>
-            <Divider orientation="left" plain>
-              推荐过滤条件
-            </Divider>
-            <Row gutter={24}>
-              <Col xs={24} md={12}>
-                <Form.Item name={['filter', 'regions']} label="仅关注地区">
-                  <Select mode="tags" placeholder="留空表示不限地区" open={false} suffixIcon={null} tokenSeparators={[',', '，']} />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={12}>
-                <Form.Item name={['filter', 'min_budget']} label="最低预算（元）">
-                  <InputNumber style={{ width: '100%' }} min={0} placeholder="留空表示不限预算" />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Form.Item style={{ marginBottom: 0 }}>
-              <Button type="primary" htmlType="submit" loading={saving}>
-                保存画像
-              </Button>
-            </Form.Item>
-          </Form>
-        )}
-      </Card>
+              </Row>
+              <Form.Item name="description" label="企业简介" style={{ marginBottom: 0 }}>
+                <Input.TextArea rows={3} placeholder="企业主营业务、核心能力简述" />
+              </Form.Item>
+            </Card>
+
+            <Card className="compass-card" title="能力标签">
+              <Row gutter={24}>
+                {TAG_FIELDS.map((f) => (
+                  <Col xs={24} md={12} key={f.name}>
+                    <Form.Item name={f.name} label={f.label}>
+                      <Select
+                        mode="tags"
+                        placeholder={f.placeholder}
+                        open={false}
+                        suffixIcon={null}
+                        tokenSeparators={[',', '，']}
+                      />
+                    </Form.Item>
+                  </Col>
+                ))}
+              </Row>
+            </Card>
+
+            <Card className="compass-card" title="典型案例">
+              <Form.Item name="cases_text" style={{ marginBottom: 0 }}>
+                <Input.TextArea rows={4} placeholder="过往项目案例描述，用于 AI 匹配参考" />
+              </Form.Item>
+            </Card>
+
+            <Card className="compass-card" title="推荐过滤条件">
+              <Row gutter={24}>
+                <Col xs={24} md={12}>
+                  <Form.Item name={['filter', 'regions']} label="仅关注地区">
+                    <Select
+                      mode="tags"
+                      placeholder="留空表示不限地区"
+                      open={false}
+                      suffixIcon={null}
+                      tokenSeparators={[',', '，']}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Form.Item name={['filter', 'min_budget']} label="最低预算（元）">
+                    <InputNumber style={{ width: '100%' }} min={0} placeholder="留空表示不限预算" />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Card>
+
+            <Button type="primary" htmlType="submit" loading={saving} icon={<SaveOutlined />} size="large">
+              保存画像
+            </Button>
+          </Space>
+        </Form>
+      </div>
     </AppLayout>
   );
 }

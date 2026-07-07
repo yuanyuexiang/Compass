@@ -11,7 +11,20 @@ dayjs.locale('zh-cn');
 
 export default function Providers({ children }: { children: ReactNode }) {
   return (
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          colorPrimary: '#2F54EB',
+          colorSuccess: '#52C41A',
+          colorWarning: '#FAAD14',
+          colorError: '#F5222D',
+          borderRadius: 10,
+          fontSize: 14,
+          colorBgLayout: '#F5F7FA',
+        },
+      }}
+    >
       <AntdApp>{children}</AntdApp>
     </ConfigProvider>
   );

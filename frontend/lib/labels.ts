@@ -37,21 +37,25 @@ export const ADVICE_COLORS: Record<Advice, string> = {
 
 export const FOLLOW_STATUSES: FollowStatus[] = ['待看', '跟进中', '放弃', '已投标'];
 
-/** 流水线状态英文键 → 中文标签（未知键直接展示原值） */
+/** 流水线状态机键（backend AnnouncementStatus）→ 中文标签（未知键直接展示原值） */
 export const PIPELINE_STATUS_LABELS: Record<string, string> = {
-  new: '新增',
-  pending: '待处理',
-  fetched: '已采集',
   crawled: '已采集',
   cleaned: '已清洗',
-  parsed: '已解析',
-  extracted: '已提取',
-  analyzed: '已分析',
-  matched: '已匹配',
-  recommended: '已推荐',
-  notified: '已通知',
+  attachments_parsed: '附件已解析',
+  ai_extracted: 'AI 已提取',
+  embedded: '已向量化',
+  published: '已发布',
   failed: '失败',
 };
+
+/** ISO 时间 → 'YYYY-MM-DD HH:mm'（空值显示 -） */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export function pipelineStatusLabel(key: string): string {
   return PIPELINE_STATUS_LABELS[key] ?? key;
