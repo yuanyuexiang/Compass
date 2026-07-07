@@ -69,7 +69,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=matrix-network
-      - traefik.http.routers.compass.rule=Host(`compass.matrix-network.tech`)
+      - traefik.http.routers.compass.rule=Host(`compass.matrix-net.tech`)
       - traefik.http.routers.compass.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.compass.tls=true
       - traefik.http.routers.compass.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
