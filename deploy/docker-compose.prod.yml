@@ -65,11 +65,11 @@ services:
     image: ${REGISTRY}/${NAMESPACE}/compass-frontend:${TAG:-latest}
     networks:
       - default
-      - matrix-net
+      - matrix-network
     labels:
       - traefik.enable=true
-      - traefik.docker.network=matrix-net
-      - traefik.http.routers.compass.rule=Host(`compass.matrix-net.tech`)
+      - traefik.docker.network=matrix-network
+      - traefik.http.routers.compass.rule=Host(`compass.matrix-network.tech`)
       - traefik.http.routers.compass.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.compass.tls=true
       - traefik.http.routers.compass.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
@@ -80,7 +80,7 @@ services:
 
 networks:
   # Traefik 所在的共享外部网络（由另一套 compose 创建）
-  matrix-net:
+  matrix-network:
     external: true
 
 volumes:
