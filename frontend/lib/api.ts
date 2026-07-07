@@ -1,6 +1,8 @@
 // 统一 fetch 封装：自动携带 Bearer token，401 跳转登录页，错误统一为中文 Error
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8300';
+// 生产镜像构建时该变量为空字符串 → 走同源相对路径（由 Next rewrites 反代到后端容器）；
+// 本地开发未设置 → 直连 8300。用 ?? 区分「未设置」与「显式置空」。
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8300';
 
 const TOKEN_KEY = 'access_token';
 const USER_KEY = 'user';

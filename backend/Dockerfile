@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# 经 PyPI 安装 uv（ghcr.io 在部分网络环境不可达）
+RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
