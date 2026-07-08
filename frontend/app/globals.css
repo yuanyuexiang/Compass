@@ -46,6 +46,16 @@ a {
   font-size: 17px;
 }
 
+/* 折叠态：图标水平居中、隐藏文字 */
+.compass-sider .ant-menu-inline-collapsed .ant-menu-item {
+  padding-inline: 0 !important;
+  text-align: center;
+}
+.compass-sider .ant-menu-inline-collapsed .ant-menu-item .anticon {
+  font-size: 18px;
+  margin: 0 !important;
+}
+
 .compass-sider .ant-menu-item-selected {
   background: rgba(255, 255, 255, 0.08) !important;
 }
