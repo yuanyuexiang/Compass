@@ -17,6 +17,7 @@ from app.ai.llm_config import extract_completion
 from app.ai.prompts.match_v1 import MATCH_SYSTEM_PROMPT_V1
 from app.matching.schemas import MatchScoreCard
 from app.models import Announcement, CompanyProfile, MatchResult, ProfileChunk, Project
+from app.opportunity import is_biddable
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,11 @@ def run_match(session: Session, project_id: int, tenant_id: int) -> MatchResult 
     if project is None or profile is None:
         return None
     ann = session.get(Announcement, project.announcement_id)
+
+    # 类型闸门：中标/成交/废标类公告不是可投标商机，不匹配推荐（见 app/opportunity.py）
+    if not is_biddable(ann.ann_type, ann.title):
+        logger.info("非可投标公告，跳过匹配 project=%s [%s]", project_id, ann.ann_type)
+        return None
 
     passed, reason = rule_filter(project, profile.data or {})
     if not passed:
