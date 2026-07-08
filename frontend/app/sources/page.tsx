@@ -474,36 +474,54 @@ export default function SourcesPage() {
             </>
           ) : null}
 
-          {watchedAdapter === 'generic' ? (
+          {watchedAdapter === 'generic' || watchedAdapter === 'generic_browser' ? (
             <>
-              <div
-                style={{
-                  background: 'rgba(47,84,235,.04)',
-                  border: '1px solid rgba(47,84,235,.15)',
-                  borderRadius: 10,
-                  padding: 16,
-                  marginBottom: 16,
-                }}
-              >
-                <Space size={8} style={{ marginBottom: 8 }}>
-                  <span className="ai-badge">
-                    <RobotOutlined /> AI
-                  </span>
-                  <Typography.Text strong>自动识别</Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    只需填公告列表页网址，AI 自动分析页面结构并填好下方配置
-                  </Typography.Text>
-                </Space>
-                <Space.Compact style={{ width: '100%' }}>
-                  <Form.Item name={['config', 'list_url']} noStyle rules={[{ required: true, message: '请输入列表页网址' }]}>
+              {watchedAdapter === 'generic' ? (
+                <div
+                  style={{
+                    background: 'rgba(47,84,235,.04)',
+                    border: '1px solid rgba(47,84,235,.15)',
+                    borderRadius: 10,
+                    padding: 16,
+                    marginBottom: 16,
+                  }}
+                >
+                  <Space size={8} style={{ marginBottom: 8 }}>
+                    <span className="ai-badge">
+                      <RobotOutlined /> AI
+                    </span>
+                    <Typography.Text strong>自动识别</Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      只需填公告列表页网址，AI 自动分析页面结构并填好下方配置
+                    </Typography.Text>
+                  </Space>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Form.Item name={['config', 'list_url']} noStyle rules={[{ required: true, message: '请输入列表页网址' }]}>
+                      <Input placeholder="https://某招标网站/公告列表页" />
+                    </Form.Item>
+                    <Button type="primary" icon={<RobotOutlined />} loading={autoDetecting} onClick={autoDetect}>
+                      AI 识别
+                    </Button>
+                  </Space.Compact>
+                </div>
+              ) : (
+                <>
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message="动态渲染模式"
+                    description="用真实浏览器执行页面 JS 后再采集，适用于列表由前端脚本生成的站点（httpx 拿不到数据时用）。渲染开销较大，速度比普通模式慢；带验证码/强反爬的站点可能仍无法采集。"
+                  />
+                  <Form.Item name={['config', 'list_url']} label="公告列表页网址" rules={[{ required: true, message: '请输入列表页网址' }]}>
                     <Input placeholder="https://某招标网站/公告列表页" />
                   </Form.Item>
-                  <Button type="primary" icon={<RobotOutlined />} loading={autoDetecting} onClick={autoDetect}>
-                    AI 识别
-                  </Button>
-                </Space.Compact>
-              </div>
-              <Form.Item name={['config', 'item_selector']} label="公告条目选择器" tooltip="每条公告所在的元素（CSS 选择器），AI 识别后一般无需改动">
+                  <Form.Item name={['config', 'wait_selector']} label="等待元素（可选）" tooltip="渲染后等待此元素出现再采集，比默认等待更可靠，通常填公告条目选择器">
+                    <Input placeholder="如 ul.news-list（留空则等页面加载完成）" />
+                  </Form.Item>
+                </>
+              )}
+              <Form.Item name={['config', 'item_selector']} label="公告条目选择器" tooltip="每条公告所在的元素（CSS 选择器）">
                 <Input placeholder="如 ul.news-list li" />
               </Form.Item>
               <Space size={12} style={{ display: 'flex' }}>

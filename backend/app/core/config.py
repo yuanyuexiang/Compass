@@ -43,5 +43,10 @@ class Settings(BaseSettings):
     # 本机代理做 HTTPS MITM 时置 false（仅开发环境；生产必须保持 true）
     crawler_verify_ssl: bool = True
 
+    # Playwright 浏览器渲染（JS 动态站兜底，tech-design §4.1）
+    playwright_headless: bool = True
+    browser_render_timeout: float = 30.0
+    browser_min_interval_seconds: float = 5.0  # 浏览器渲染更重，间隔更长
+
 
 settings = Settings()

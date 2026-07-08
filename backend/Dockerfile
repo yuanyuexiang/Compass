@@ -7,6 +7,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
+# Playwright chromium + 系统依赖：供 JS 动态站采集（worker 用；api/beat 不用但共享镜像）。
+# 显著增大镜像（约 +400MB）；若确定不采集动态站，可注释此行以瘦身。
+RUN uv run playwright install --with-deps chromium
+
 COPY app ./app
 COPY scripts ./scripts
 

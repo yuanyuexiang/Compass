@@ -2,6 +2,7 @@
 
 from app.crawler.adapters.ccgp import CcgpAdapter
 from app.crawler.adapters.generic import GenericAdapter
+from app.crawler.adapters.generic_browser import GenericBrowserAdapter
 from app.crawler.adapters.jsggzy import JsggzyAdapter
 
-__all__ = ["CcgpAdapter", "GenericAdapter", "JsggzyAdapter"]
+__all__ = ["CcgpAdapter", "GenericAdapter", "GenericBrowserAdapter", "JsggzyAdapter"]

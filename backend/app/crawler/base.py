@@ -90,6 +90,15 @@ class SourceAdapter(ABC):
         resp.raise_for_status()
         return resp
 
+    def render(self, url: str, wait_selector: str | None = None) -> str:
+        """浏览器渲染取 HTML（JS 动态站用，tech-design §4.1）。限速独立于 httpx。"""
+        from app.crawler import browser
+
+        browser.throttle(
+            float(self.config.get("min_interval_seconds", settings.browser_min_interval_seconds))
+        )
+        return browser.render(url, wait_selector=wait_selector)
+
     @abstractmethod
     def list_announcements(self, since: datetime | None = None) -> Iterator[RawAnnouncement]:
         """列出公告（新→旧）。since 之前的条目应停止产出。"""
