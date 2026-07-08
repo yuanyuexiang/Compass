@@ -3,12 +3,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Avatar, Button, Layout, Menu, Space, Typography } from 'antd';
+import { Avatar, Badge, Breadcrumb, Button, Layout, Menu, Space, Typography } from 'antd';
+import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
 import {
   BellOutlined,
   CloudDownloadOutlined,
   CompassOutlined,
   DashboardOutlined,
+  HomeOutlined,
   IdcardOutlined,
   LogoutOutlined,
   MessageOutlined,
@@ -45,6 +47,37 @@ function selectedMenuKey(pathname: string): string {
   return hit ?? '/';
 }
 
+const PAGE_LABELS: Record<string, string> = {
+  '/opportunities': '商机查询',
+  '/profile': '企业画像',
+  '/settings': '订阅设置',
+  '/notifications': '通知中心',
+  '/sources': '采集管理',
+};
+
+/** 顶栏面包屑：首页可点击回工作台；项目详情显示三级路径。 */
+function breadcrumbItems(pathname: string): ItemType[] {
+  const home: ItemType = {
+    title: (
+      <Link href="/">
+        <HomeOutlined /> 首页
+      </Link>
+    ),
+  };
+  if (pathname === '/') {
+    return [{ title: (<><HomeOutlined /> 工作台</>) }];
+  }
+  if (pathname.startsWith('/projects')) {
+    return [
+      home,
+      { title: <Link href="/opportunities">商机查询</Link> },
+      { title: '项目详情' },
+    ];
+  }
+  const key = Object.keys(PAGE_LABELS).find((k) => pathname.startsWith(k));
+  return [home, { title: key ? PAGE_LABELS[key] : '' }];
+}
+
 interface AppLayoutProps {
   children: ReactNode;
   title?: string;
@@ -55,6 +88,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     if (!getToken()) {
@@ -71,7 +105,10 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       .catch(() => {
         // 后端未启动时使用缓存信息，静默降级
       });
-  }, [router]);
+    apiFetch<{ tenant?: { unread: number } }>('/api/stats')
+      .then((s) => setUnread(s.tenant?.unread ?? 0))
+      .catch(() => {});
+  }, [router, pathname]);
 
   const logout = () => {
     clearSession();
@@ -111,13 +148,22 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
             padding: '0 24px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'flex-end',
+            justifyContent: 'space-between',
             borderBottom: '1px solid #F0F0F0',
             height: 56,
             lineHeight: '56px',
           }}
         >
+          <Breadcrumb items={breadcrumbItems(pathname)} style={{ fontSize: 14 }} />
           <Space size="middle">
+            <Badge count={unread} size="small" offset={[-2, 4]}>
+              <Button
+                type="text"
+                aria-label="通知中心"
+                icon={<BellOutlined style={{ fontSize: 17 }} />}
+                onClick={() => router.push('/notifications')}
+              />
+            </Badge>
             <Space size={8}>
               <Avatar size={32} style={{ background: '#2F54EB', fontSize: 14 }}>
                 {avatarChar}
