@@ -10,5 +10,6 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY app ./app
 COPY scripts ./scripts
 
-ENV PATH="/app/.venv/bin:$PATH"
+# PYTHONPATH 保证 `python scripts/xxx.py` 也能找到 app 包（uvicorn/celery 本就不依赖此项）
+ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app
 CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
