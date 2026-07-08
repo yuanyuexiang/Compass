@@ -5,6 +5,7 @@
 """
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -106,8 +107,41 @@ def _process_attachments(session: Session, ann: Announcement, adapter: SourceAda
             logger.warning("附件处理失败 ann=%s url=%s: %s", ann.id, link.url, exc)
 
 
+def crawl_is_due(last_iso: str | None, interval_minutes: int, now: datetime) -> bool:
+    """判断距上次自动采集是否已达到配置间隔（tick 调度的核心判据，纯函数可测）。"""
+    if not last_iso:
+        return True
+    return now - datetime.fromisoformat(last_iso) >= timedelta(minutes=interval_minutes)
+
+
+@celery.task(name="app.tasks.pipeline.crawl_tick")
+def crawl_tick() -> None:
+    """每分钟 tick：按管理员配置的间隔（system_settings）决定是否派发全量采集。"""
+    from app.core.kv import (
+        DEFAULT_CRAWL_INTERVAL_MINUTES,
+        KEY_CRAWL_INTERVAL,
+        KEY_LAST_AUTO_CRAWL,
+        get_setting,
+        set_setting,
+    )
+
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        interval = int(
+            get_setting(session, KEY_CRAWL_INTERVAL, DEFAULT_CRAWL_INTERVAL_MINUTES)
+        )
+        if not crawl_is_due(get_setting(session, KEY_LAST_AUTO_CRAWL), interval, now):
+            return
+        set_setting(session, KEY_LAST_AUTO_CRAWL, now.isoformat())
+        source_ids = session.scalars(select(Source.id).where(Source.enabled)).all()
+    logger.info("自动采集触发（间隔 %d 分钟，%d 个源）", interval, len(source_ids))
+    for sid in source_ids:
+        crawl_source_task.delay(sid)
+
+
 @celery.task(name="app.tasks.pipeline.crawl_all_sources")
 def crawl_all_sources() -> None:
+    """手动全量采集（不影响自动调度的计时）。"""
     with session_scope() as session:
         source_ids = session.scalars(select(Source.id).where(Source.enabled)).all()
     for sid in source_ids:
@@ -116,8 +150,6 @@ def crawl_all_sources() -> None:
 
 @celery.task(name="app.tasks.pipeline.crawl_source", max_retries=2, default_retry_delay=300)
 def crawl_source_task(source_id: int) -> None:
-    from datetime import UTC, datetime
-
     with session_scope() as session:
         source = session.get(Source, source_id)
         if source is None or not source.enabled:

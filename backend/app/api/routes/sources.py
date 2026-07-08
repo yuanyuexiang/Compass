@@ -52,6 +52,150 @@ def list_adapters(current: CurrentUser = CurrentUserDep) -> list[dict]:
     return [{"name": k, "display_name": v} for k, v in _adapters().items()]
 
 
+# —— 测试采集（不入库的试跑预览，必须声明在 /{source_id} 路由之前）——
+
+
+class SourceTestIn(BaseModel):
+    adapter: str
+    config: dict = {}
+
+
+@router.post("/sources/test")
+def test_source(body: SourceTestIn, current: CurrentUser = AdminDep) -> dict:
+    """用给定配置试采列表前 5 条 + 首条详情正文，供保存前验证选择器。"""
+    from app.crawler.base import get_adapter
+    from app.parsing.clean import html_to_text
+
+    if body.adapter not in _adapters():
+        raise HTTPException(status_code=422, detail=f"未注册的适配器: {body.adapter}")
+    config = dict(body.config)
+    config.setdefault("min_interval_seconds", 1)  # 试跑只发 2 个请求，用短间隔
+    adapter = get_adapter(body.adapter, config)
+    try:
+        items = []
+        for raw in adapter.list_announcements():
+            items.append(
+                {
+                    "title": raw.title,
+                    "url": raw.url,
+                    "publish_time": raw.publish_time.isoformat() if raw.publish_time else None,
+                    "region": raw.region,
+                }
+            )
+            if len(items) >= 5:
+                break
+        detail_preview = None
+        if items:
+            text = html_to_text(adapter.fetch_detail(items[0]["url"]), adapter.content_selectors())
+            detail_preview = {"content_excerpt": text[:400], "content_length": len(text)}
+        return {"ok": True, "items": items, "detail_preview": detail_preview}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:500], "items": [], "detail_preview": None}
+    finally:
+        adapter.close()
+
+
+# —— AI 自动识别（贴网址 → LLM 生成选择器 → 自动试采验证）——
+
+
+class SuggestIn(BaseModel):
+    list_url: str = Field(min_length=8)
+
+
+@router.post("/sources/suggest")
+def suggest_source(body: SuggestIn, current: CurrentUser = AdminDep) -> dict:
+    """用户只提供列表页网址：抓取 → LLM 识别选择器 → 试采验证 → 返回配置与预览。"""
+    from app.ai.suggest import suggest_content_selector, suggest_list_selectors
+    from app.crawler.adapters.generic import GenericAdapter
+    from app.crawler.base import get_adapter
+    from app.parsing.clean import html_to_text
+
+    adapter = get_adapter("generic", {"list_url": body.list_url, "min_interval_seconds": 1})
+    try:
+        list_html = adapter.get(body.list_url).text
+
+        selectors = suggest_list_selectors(list_html)
+        config = {"list_url": body.list_url, **selectors}
+        items = GenericAdapter.parse_list(list_html, body.list_url, config) if selectors else []
+        if len(items) < 3:  # 置信度不足时带反馈重试一次
+            fb = f"item_selector「{config.get('item_selector')}」只匹配到 {len(items)} 条公告"
+            retry = suggest_list_selectors(list_html, feedback=fb)
+            if retry:
+                retry_config = {"list_url": body.list_url, **retry}
+                retry_items = GenericAdapter.parse_list(list_html, body.list_url, retry_config)
+                if len(retry_items) > len(items):
+                    config, items = retry_config, retry_items
+
+        detail_preview = None
+        if items:
+            detail_html = adapter.get(items[0].url).text
+            if content_selector := suggest_content_selector(detail_html):
+                text = html_to_text(detail_html, [content_selector])
+                if len(text) >= 100:  # 选择器有效性验证
+                    config["content_selector"] = content_selector
+                else:
+                    text = html_to_text(detail_html)
+            else:
+                text = html_to_text(detail_html)
+            detail_preview = {"content_excerpt": text[:400], "content_length": len(text)}
+
+        ok = len(items) >= 3
+        return {
+            "ok": ok,
+            "config": config,
+            "items": [
+                {
+                    "title": it.title,
+                    "url": it.url,
+                    "publish_time": it.publish_time.isoformat() if it.publish_time else None,
+                    "region": it.region,
+                }
+                for it in items[:5]
+            ],
+            "detail_preview": detail_preview,
+            "error": None if ok else "自动识别置信度不足，请核对下方选择器或手动调整后测试",
+        }
+    except Exception as exc:
+        return {"ok": False, "config": None, "items": [], "detail_preview": None,
+                "error": str(exc)[:500]}
+    finally:
+        adapter.close()
+
+
+# —— 自动采集调度设置（必须声明在 /{source_id} 路由之前）——
+
+
+class ScheduleIn(BaseModel):
+    interval_minutes: int = Field(ge=5, le=720)  # 下限 5 分钟：对源站保持礼貌
+
+
+@router.get("/sources/schedule")
+def get_schedule(current: CurrentUser = CurrentUserDep) -> dict:
+    from app.core.kv import (
+        DEFAULT_CRAWL_INTERVAL_MINUTES,
+        KEY_CRAWL_INTERVAL,
+        KEY_LAST_AUTO_CRAWL,
+        get_setting,
+    )
+
+    with session_scope() as session:
+        return {
+            "interval_minutes": get_setting(
+                session, KEY_CRAWL_INTERVAL, DEFAULT_CRAWL_INTERVAL_MINUTES
+            ),
+            "last_auto_crawl_at": get_setting(session, KEY_LAST_AUTO_CRAWL),
+        }
+
+
+@router.put("/sources/schedule")
+def put_schedule(body: ScheduleIn, current: CurrentUser = AdminDep) -> dict:
+    from app.core.kv import KEY_CRAWL_INTERVAL, set_setting
+
+    with session_scope() as session:
+        set_setting(session, KEY_CRAWL_INTERVAL, body.interval_minutes)
+    return {"ok": True, "interval_minutes": body.interval_minutes}
+
+
 class SourceIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     display_name: str = Field(default="", max_length=128)
@@ -75,6 +219,14 @@ def create_source(body: SourceIn, current: CurrentUser = AdminDep) -> dict:
     with session_scope() as session:
         if session.scalar(select(Source).where(Source.name == body.name)):
             raise HTTPException(status_code=409, detail="同名数据源已存在")
+        # 防重复采集：同平台且采集配置完全相同的源只允许一个
+        for existing in session.scalars(select(Source).where(Source.adapter == body.adapter)):
+            if (existing.config or {}) == (body.config or {}):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"与「{existing.display_name or existing.name}」同平台且配置相同，"
+                    "会重复采集；如需拆分范围请修改 config",
+                )
         source = Source(
             name=body.name,
             display_name=body.display_name or body.name,
@@ -104,6 +256,27 @@ def update_source(source_id: int, body: SourceUpdate, current: CurrentUser = Adm
         if body.config is not None:
             source.config = body.config
         return {"ok": True}
+
+
+@router.delete("/sources/{source_id}")
+def delete_source(source_id: int, current: CurrentUser = AdminDep) -> dict:
+    """仅允许删除没有公告数据的源；有数据的源出于完整性只能停用。"""
+    with session_scope() as session:
+        source = session.get(Source, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        count = session.scalar(
+            select(func.count()).select_from(Announcement).where(
+                Announcement.source_id == source_id
+            )
+        )
+        if count:
+            raise HTTPException(
+                status_code=409,
+                detail=f"该数据源已采集 {count} 条公告，为保数据完整性不可删除，请改为停用",
+            )
+        session.delete(source)
+    return {"ok": True}
 
 
 @router.post("/sources/{source_id}/crawl")

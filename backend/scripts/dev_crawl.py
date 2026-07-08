@@ -38,11 +38,13 @@ def crawl_with_db(adapter_name: str, limit: int) -> None:
     from app.tasks.pipeline import run_crawl_source, run_fetch_and_clean
 
     init_db()
-    source_name = f"{adapter_name}-dev"
     with session_scope() as session:
-        source = session.scalar(select(Source).where(Source.name == source_name))
+        # 复用该适配器已有的源（优先种子创建的正式源），避免制造重复数据源
+        source = session.scalar(
+            select(Source).where(Source.adapter == adapter_name).order_by(Source.id)
+        )
         if source is None:
-            source = Source(name=source_name, adapter=adapter_name, cron="0 * * * *")
+            source = Source(name=f"{adapter_name}-dev", adapter=adapter_name, cron="0 * * * *")
             session.add(source)
             session.flush()
         new_ids = run_crawl_source(session, source, limit=limit)

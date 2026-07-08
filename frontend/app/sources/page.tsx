@@ -6,21 +6,30 @@ import {
   App,
   Button,
   Card,
+  Divider,
   Empty,
   Form,
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Select,
   Skeleton,
   Space,
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { CloudDownloadOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import {
+  CloudDownloadOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
 import { formatDateTime } from '@/lib/labels';
@@ -43,36 +52,58 @@ interface AdapterItem {
   display_name: string;
 }
 
-/** 各适配器的 config 示例模板（新增源时按所选适配器预填） */
-const CONFIG_TEMPLATES: Record<string, object> = {
-  ccgp: {
-    channels: ['https://www.ccgp.gov.cn/cggg/zygg/', 'https://www.ccgp.gov.cn/cggg/dfgg/'],
-  },
-  jsggzy: {
-    categorynums: ['003001001', '003002001', '003003001', '003004002'],
-    rows_per_category: 20,
-  },
-};
+interface ScheduleInfo {
+  interval_minutes: number;
+  last_auto_crawl_at: string | null;
+}
+
+/** 江苏公共资源交易平台的采集类目（类目号 → 中文名，供多选框展示） */
+const JSGGZY_CATEGORIES = [
+  { value: '003001001', label: '建设工程' },
+  { value: '003002001', label: '交通工程' },
+  { value: '003003001', label: '水利工程' },
+  { value: '003004002', label: '政府采购' },
+  { value: '003009001', label: '其他交易' },
+  { value: '003010001', label: '药品耗材' },
+  { value: '003011001', label: '机电设备' },
+];
+
+interface TestResult {
+  ok: boolean;
+  error?: string;
+  items: { title: string; url: string; publish_time: string | null; region: string | null }[];
+  detail_preview: { content_excerpt: string; content_length: number } | null;
+}
 
 export default function SourcesPage() {
   const { message } = App.useApp();
   const [items, setItems] = useState<SourceItem[]>([]);
   const [adapters, setAdapters] = useState<AdapterItem[]>([]);
+  const [schedule, setSchedule] = useState<ScheduleInfo | null>(null);
+  const [intervalInput, setIntervalInput] = useState<number>(30);
+  const [savingInterval, setSavingInterval] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<SourceItem | null>(null);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [autoDetecting, setAutoDetecting] = useState(false);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [form] = Form.useForm();
+  const watchedAdapter = Form.useWatch('adapter', form);
 
   const load = useCallback(async () => {
     try {
-      const [sources, adapterList] = await Promise.all([
+      const [sources, adapterList, sched] = await Promise.all([
         apiFetch<SourceItem[]>('/api/sources'),
         apiFetch<AdapterItem[]>('/api/sources/adapters'),
+        apiFetch<ScheduleInfo>('/api/sources/schedule'),
       ]);
       setItems(sources);
       setAdapters(adapterList);
+      setSchedule(sched);
+      setIntervalInput(sched.interval_minutes);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败');
@@ -96,6 +127,22 @@ export default function SourcesPage() {
     }
   };
 
+  const saveInterval = async () => {
+    setSavingInterval(true);
+    try {
+      await apiFetch('/api/sources/schedule', {
+        method: 'PUT',
+        body: JSON.stringify({ interval_minutes: intervalInput }),
+      });
+      setSchedule((prev) => (prev ? { ...prev, interval_minutes: intervalInput } : prev));
+      message.success(`自动采集间隔已改为每 ${intervalInput} 分钟，即时生效`);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setSavingInterval(false);
+    }
+  };
+
   const triggerCrawl = async (record?: SourceItem) => {
     try {
       await apiFetch(record ? `/api/sources/${record.id}/crawl` : '/api/sources/crawl-all', {
@@ -109,8 +156,68 @@ export default function SourcesPage() {
     }
   };
 
+  const deleteSource = async (record: SourceItem) => {
+    try {
+      await apiFetch(`/api/sources/${record.id}`, { method: 'DELETE' });
+      message.success(`已删除 ${record.display_name}`);
+      void load();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '删除失败');
+    }
+  };
+
+  const testCrawl = async () => {
+    const adapter = form.getFieldValue('adapter');
+    if (!adapter) {
+      message.warning('请先选择采集平台');
+      return;
+    }
+    const config = (form.getFieldValue('config') as object) || {};
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await apiFetch<TestResult>('/api/sources/test', {
+        method: 'POST',
+        body: JSON.stringify({ adapter, config }),
+      });
+      setTestResult(result);
+      if (result.ok && result.items.length === 0) {
+        message.warning('连接成功但未解析出任何公告，请检查配置');
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '测试失败');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const autoDetect = async () => {
+    const url = form.getFieldValue(['config', 'list_url']);
+    if (!url) {
+      message.warning('请先填写公告列表页网址');
+      return;
+    }
+    setAutoDetecting(true);
+    setTestResult(null);
+    try {
+      const r = await apiFetch<TestResult & { config: Record<string, unknown> | null }>(
+        '/api/sources/suggest',
+        { method: 'POST', body: JSON.stringify({ list_url: url }) },
+      );
+      if (r.config) form.setFieldsValue({ config: r.config });
+      setTestResult({ ok: r.ok, error: r.error, items: r.items, detail_preview: r.detail_preview });
+      if (r.ok) message.success('已自动识别并回填配置，请核对下方预览');
+      else if (r.error) message.warning(r.error);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '自动识别失败');
+    } finally {
+      setAutoDetecting(false);
+    }
+  };
+
   const openModal = (record: SourceItem | null) => {
     setEditing(record);
+    setTestResult(null);
     setModalOpen(true);
     form.setFieldsValue(
       record
@@ -119,28 +226,19 @@ export default function SourcesPage() {
             display_name: record.display_name,
             adapter: record.adapter,
             min_interval_seconds: record.min_interval_seconds,
-            config: JSON.stringify(record.config ?? {}, null, 2),
+            config: record.config ?? {},
           }
-        : { name: '', display_name: '', adapter: undefined, min_interval_seconds: 3, config: '{}' },
+        : { name: '', display_name: '', adapter: undefined, min_interval_seconds: 3, config: {} },
     );
   };
 
-  const onAdapterChange = (adapter: string) => {
-    const current = (form.getFieldValue('config') as string | undefined)?.trim();
-    if (!editing && (!current || current === '{}')) {
-      form.setFieldsValue({ config: JSON.stringify(CONFIG_TEMPLATES[adapter] ?? {}, null, 2) });
-    }
+  const onAdapterChange = () => {
+    if (!editing) form.setFieldsValue({ config: {} }); // 换平台清空配置
   };
 
   const submit = async () => {
     const values = await form.validateFields();
-    let config: object;
-    try {
-      config = JSON.parse(values.config || '{}');
-    } catch {
-      message.error('config 不是合法的 JSON');
-      return;
-    }
+    const config = (values.config as object) || {};
     setSaving(true);
     try {
       if (editing) {
@@ -218,7 +316,7 @@ export default function SourcesPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 190,
+      width: 235,
       render: (_, record) => (
         <Space>
           <Button
@@ -234,14 +332,51 @@ export default function SourcesPage() {
           <Button size="small" onClick={() => openModal(record)}>
             编辑
           </Button>
+          {record.announcement_count > 0 ? (
+            <Tooltip title={`已采集 ${record.announcement_count} 条公告，为保数据完整性不可删除，可停用`}>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled />
+            </Tooltip>
+          ) : (
+            <Popconfirm
+              title={`删除数据源「${record.display_name}」？`}
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => deleteSource(record)}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
   ];
 
   return (
-    <AppLayout title="采集管理" subtitle="数据源配置、启停与手动触发（自动调度每 30 分钟一轮）">
+    <AppLayout title="采集管理" subtitle="数据源配置、启停、手动触发与自动调度">
       {error ? <Alert type="warning" showIcon message={error} style={{ marginBottom: 16 }} /> : null}
+      <Card className="compass-card" style={{ marginBottom: 16 }} styles={{ body: { padding: '16px 24px' } }}>
+        <Space size="large" wrap align="center">
+          <Space size={8}>
+            <Typography.Text strong>自动采集间隔</Typography.Text>
+            <InputNumber
+              min={5}
+              max={720}
+              value={intervalInput}
+              onChange={(v) => setIntervalInput(v ?? 30)}
+              style={{ width: 90 }}
+            />
+            <Typography.Text>分钟</Typography.Text>
+            <Button type="primary" loading={savingInterval} onClick={saveInterval}
+              disabled={schedule?.interval_minutes === intervalInput}>
+              保存
+            </Button>
+          </Space>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            上次自动采集：{formatDateTime(schedule?.last_auto_crawl_at)}（修改即时生效，最小 5 分钟以保持对源站的礼貌）
+          </Typography.Text>
+        </Space>
+      </Card>
       <Card
         className="compass-card"
         title="数据源"
@@ -271,13 +406,13 @@ export default function SourcesPage() {
       </Card>
 
       <Modal
-        title={editing ? `编辑数据源：${editing.name}` : '新增数据源'}
+        title={editing ? `编辑数据源：${editing.display_name}` : '新增数据源'}
         open={modalOpen}
         onOk={submit}
         onCancel={() => setModalOpen(false)}
         confirmLoading={saving}
         okText={editing ? '保存' : '创建'}
-        width={560}
+        width={680}
       >
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item
@@ -305,15 +440,137 @@ export default function SourcesPage() {
               disabled={!!editing}
             />
           </Form.Item>
-          <Form.Item name="min_interval_seconds" label="限速（每次请求最小间隔，秒）">
+          <Form.Item name="min_interval_seconds" label="采集限速（每次请求最小间隔，秒）">
             <InputNumber min={1} max={60} style={{ width: 160 }} />
           </Form.Item>
-          <Form.Item name="config" label="采集配置（JSON，按适配器自动给出模板）">
-            <Input.TextArea rows={7} style={{ fontFamily: 'monospace', fontSize: 12 }} />
-          </Form.Item>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            同一适配器可建多个源实例（如 jsggzy 按类目拆分）；新平台需先在后端实现适配器。
-          </Typography.Text>
+
+          <Divider orientation="left" style={{ fontSize: 13 }}>
+            采集配置
+          </Divider>
+
+          {watchedAdapter === 'ccgp' ? (
+            <Form.Item
+              name={['config', 'channels']}
+              label="频道列表页地址"
+              tooltip="要采集的公告频道列表页 URL，可填多个（回车分隔）"
+            >
+              <Select
+                mode="tags"
+                placeholder="如 https://www.ccgp.gov.cn/cggg/zygg/"
+                tokenSeparators={[',', ' ']}
+                open={false}
+              />
+            </Form.Item>
+          ) : null}
+
+          {watchedAdapter === 'jsggzy' ? (
+            <>
+              <Form.Item name={['config', 'categorynums']} label="采集类目">
+                <Select mode="multiple" placeholder="选择要采集的公告类目" options={JSGGZY_CATEGORIES} />
+              </Form.Item>
+              <Form.Item name={['config', 'rows_per_category']} label="每类采集条数">
+                <InputNumber min={5} max={100} style={{ width: 160 }} placeholder="20" />
+              </Form.Item>
+            </>
+          ) : null}
+
+          {watchedAdapter === 'generic' ? (
+            <>
+              <div
+                style={{
+                  background: 'rgba(47,84,235,.04)',
+                  border: '1px solid rgba(47,84,235,.15)',
+                  borderRadius: 10,
+                  padding: 16,
+                  marginBottom: 16,
+                }}
+              >
+                <Space size={8} style={{ marginBottom: 8 }}>
+                  <span className="ai-badge">
+                    <RobotOutlined /> AI
+                  </span>
+                  <Typography.Text strong>自动识别</Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    只需填公告列表页网址，AI 自动分析页面结构并填好下方配置
+                  </Typography.Text>
+                </Space>
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name={['config', 'list_url']} noStyle rules={[{ required: true, message: '请输入列表页网址' }]}>
+                    <Input placeholder="https://某招标网站/公告列表页" />
+                  </Form.Item>
+                  <Button type="primary" icon={<RobotOutlined />} loading={autoDetecting} onClick={autoDetect}>
+                    AI 识别
+                  </Button>
+                </Space.Compact>
+              </div>
+              <Form.Item name={['config', 'item_selector']} label="公告条目选择器" tooltip="每条公告所在的元素（CSS 选择器），AI 识别后一般无需改动">
+                <Input placeholder="如 ul.news-list li" />
+              </Form.Item>
+              <Space size={12} style={{ display: 'flex' }}>
+                <Form.Item name={['config', 'link_selector']} label="链接选择器" style={{ flex: 1 }}>
+                  <Input placeholder="默认 a" />
+                </Form.Item>
+                <Form.Item name={['config', 'date_selector']} label="日期选择器" style={{ flex: 1 }}>
+                  <Input placeholder="可留空（自动识别）" />
+                </Form.Item>
+              </Space>
+              <Form.Item name={['config', 'content_selector']} label="正文容器选择器">
+                <Input placeholder="详情页正文所在元素" />
+              </Form.Item>
+              <Form.Item name={['config', 'region']} label="所属地区（可选）">
+                <Input placeholder="如 江苏省" style={{ width: 200 }} />
+              </Form.Item>
+            </>
+          ) : null}
+
+          {!watchedAdapter ? (
+            <Typography.Text type="secondary">请先在上方选择采集平台</Typography.Text>
+          ) : null}
+
+          <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
+            <Space>
+              <Button icon={<ThunderboltOutlined />} loading={testing} onClick={testCrawl}>
+                测试采集
+              </Button>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                保存前先试跑：抓列表前 5 条 + 首条正文，确认配置正确。
+              </Typography.Text>
+            </Space>
+            {testResult ? (
+              testResult.ok ? (
+                <Alert
+                  type={testResult.items.length ? 'success' : 'warning'}
+                  showIcon
+                  message={`解析出 ${testResult.items.length} 条公告${
+                    testResult.detail_preview
+                      ? `，首条正文 ${testResult.detail_preview.content_length} 字`
+                      : ''
+                  }`}
+                  description={
+                    <div style={{ fontSize: 12 }}>
+                      {testResult.items.map((it, i) => (
+                        <div key={i} style={{ marginBottom: 2 }}>
+                          {it.publish_time ? `[${it.publish_time.slice(0, 10)}] ` : '[无日期] '}
+                          {it.title}
+                        </div>
+                      ))}
+                      {testResult.detail_preview ? (
+                        <div className="evidence-quote" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                          {testResult.detail_preview.content_excerpt.slice(0, 200)}…
+                        </div>
+                      ) : null}
+                    </div>
+                  }
+                />
+              ) : (
+                <Alert type="error" showIcon message="测试失败" description={testResult.error} />
+              )
+            ) : null}
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              「通用网站」适配器可接入结构规整的静态招标站点（AI 自动识别或手填选择器）；
+              JS 渲染 / 需登录 / 有验证码的站点需联系开发专用适配器。
+            </Typography.Text>
+          </Space>
         </Form>
       </Modal>
     </AppLayout>

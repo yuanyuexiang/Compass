@@ -43,8 +43,8 @@ uv run python scripts/dev_match.py             # 发布+匹配+通知演练
 ## 架构要点（改代码前必读）
 
 - **公共层/租户层分离**：`models/public.py`（公告只处理一次，全租户共享）vs `models/tenant.py`（画像/匹配/订阅/通知，均含 tenant_id）。租户隔离由 `core/security.py` 的 JWT 依赖注入强制——租户层查询必须过滤 `current.tenant_id`。
-- **流水线状态机**：`crawled → cleaned → attachments_parsed → ai_extracted → embedded → published`（+failed），发布后 fan-out 到各租户匹配。业务逻辑写成纯函数 `run_*(session,...)`，Celery 任务只是薄包装（`tasks/pipeline.py`）。Beat 每 30 分钟全量采集一轮；数据源经 `/api/sources`（`api/routes/sources.py`）管理，管理员可在后台"采集管理"页增改/启停/手动触发（写操作用 `AdminDep` 权限依赖）。
-- **新增采集平台**：`crawler/adapters/` 写 SourceAdapter 子类 + `@register` + 在 `adapters/__init__.py` import；解析逻辑放可离线测试的静态方法，用真实页面 fixture 写测试。适配器内置限速，**不得绕过**；只采官方公开源（合规红线见 tech-design §10.4）。
+- **流水线状态机**：`crawled → cleaned → attachments_parsed → ai_extracted → embedded → published`（+failed），发布后 fan-out 到各租户匹配。业务逻辑写成纯函数 `run_*(session,...)`，Celery 任务只是薄包装（`tasks/pipeline.py`）。自动采集用 **tick 模式**：Beat 每分钟跑 `crawl_tick`，按 `system_settings` 里管理员配置的间隔（默认 30 分钟，5–720 可调，改动即时生效、无需重启）决定是否派发；数据源经 `/api/sources`（`api/routes/sources.py`）管理，管理员可在后台"采集管理"页增改/启停/手动触发/调整间隔（写操作用 `AdminDep` 权限依赖）。系统级配置读写用 `app/core/kv.py`。
+- **新增采集平台**：结构规整的静态站用 `generic` 通用适配器（`adapters/generic.py`），管理员在后台"新增数据源"选「通用网站」，**贴列表页网址点 AI 识别**（`ai/suggest.py` 让 DeepSeek 生成选择器）或手填结构化表单，"测试采集"预览后保存——零代码。JS 渲染/反爬站才写专用 SourceAdapter 子类（`@register` + `adapters/__init__.py` import，解析逻辑放可离线测试的静态方法 + 真实页面 fixture 测试）。适配器内置限速**不得绕过**；只采官方公开源（合规红线见 tech-design §10.4）。相关接口：`POST /api/sources/test`（试采不入库）、`POST /api/sources/suggest`（AI 识别）。前端 config 一律走结构化中文表单，不暴露 JSON。
 - **LLM 约定**：直接用 LiteLLM（入口 `ai/llm_config.py`），模型 `deepseek-v4-flash`（旧模型名已弃用）。Prompt 一律放 `ai/prompts/` 版本化（该目录豁免行长 lint）。**对 LLM 输出做宽容解析**（历史教训：模型会把字符串字段包成 {value,...} 对象且重试不自愈）——见 `ai/schemas.py`、`matching/schemas.py` 的 field_validator。
 - **匹配三级漏斗**（`matching/engine.py`）：规则（画像 data.filter）→ 向量（无 embedding 自动跳过）→ LLM 评分卡。评分卡含 match_score/star/advice/reasons/六项风险。
 - **通知**（`notify/`）：站内信必写兜底，外部渠道（email/企微/钉钉/飞书）按 Subscription.channels 配置驱动，单渠道失败不影响其他。

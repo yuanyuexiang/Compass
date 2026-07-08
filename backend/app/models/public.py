@@ -12,6 +12,15 @@ from app.core.config import settings
 from app.core.db import Base
 
 
+class SystemSetting(Base):
+    """系统级键值配置（如自动采集间隔），管理员可在后台修改、即时生效。"""
+
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value = mapped_column(JSONB, nullable=True)
+
+
 class AnnouncementStatus(enum.StrEnum):
     """流水线状态机（tech-design.md §4）。"""
 

@@ -13,10 +13,11 @@ celery.conf.update(
 )
 
 celery.conf.beat_schedule = {
-    # 每半小时全量调度；按 sources.cron 逐源精确调度留 V1.x（需 RedBeat）
-    "crawl-all-sources": {
-        "task": "app.tasks.pipeline.crawl_all_sources",
-        "schedule": crontab(minute="0,30"),
+    # 每分钟轻量 tick：读取管理员配置的采集间隔（system_settings），到点才真正派发。
+    # 间隔改动即时生效，无需重启 beat；按 sources.cron 逐源精确调度留 V1.x（需 RedBeat）。
+    "crawl-scheduler-tick": {
+        "task": "app.tasks.pipeline.crawl_tick",
+        "schedule": crontab(),  # 每分钟
     },
     # 每日商机日报（§7，默认 8:30）
     "daily-digest": {

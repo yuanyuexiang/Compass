@@ -22,7 +22,7 @@ const MENU_ITEMS = [
   { key: '/opportunities', icon: <SearchOutlined />, label: <Link href="/opportunities">商机查询</Link> },
   { key: '/profile', icon: <IdcardOutlined />, label: <Link href="/profile">企业画像</Link> },
   { key: '/settings', icon: <BellOutlined />, label: <Link href="/settings">订阅设置</Link> },
-  { key: '/notifications', icon: <MessageOutlined />, label: <Link href="/notifications">通知</Link> },
+  { key: '/notifications', icon: <MessageOutlined />, label: <Link href="/notifications">通知中心</Link> },
 ];
 
 const ADMIN_MENU_ITEMS = [
@@ -93,8 +93,8 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
         >
           <CompassOutlined style={{ fontSize: 30, color: '#FAAD14' }} />
           <div>
-            <div style={{ color: '#fff', fontSize: 18, fontWeight: 600, lineHeight: 1.25 }}>司南</div>
-            <div style={{ color: '#8C9BC4', fontSize: 11 }}>AI 寻标 Agent</div>
+            <div style={{ color: '#fff', fontSize: 20, fontWeight: 600, lineHeight: 1.25 }}>司南</div>
+            <div style={{ color: '#8C9BC4', fontSize: 12 }}>AI 寻标 Agent</div>
           </div>
         </div>
         <Menu

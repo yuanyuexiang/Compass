@@ -1,4 +1,11 @@
-from app.models.public import Announcement, AnnouncementStatus, Attachment, Project, Source
+from app.models.public import (
+    Announcement,
+    AnnouncementStatus,
+    Attachment,
+    Project,
+    Source,
+    SystemSetting,
+)
 from app.models.tenant import (
     CompanyProfile,
     MatchResult,
@@ -20,6 +27,7 @@ __all__ = [
     "Project",
     "Source",
     "Subscription",
+    "SystemSetting",
     "Tenant",
     "User",
 ]

@@ -37,6 +37,13 @@ a {
 
 .compass-sider .ant-menu-item {
   position: relative;
+  font-size: 18px;
+  height: 46px;
+  line-height: 46px;
+}
+
+.compass-sider .ant-menu-item .anticon {
+  font-size: 17px;
 }
 
 .compass-sider .ant-menu-item-selected {
