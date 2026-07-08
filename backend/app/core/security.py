@@ -47,3 +47,14 @@ def get_current_user(request: Request) -> CurrentUser:
 
 
 CurrentUserDep = Depends(get_current_user)
+
+ADMIN_ROLES = ("tenant_admin", "platform_admin")
+
+
+def require_admin(current: CurrentUser = CurrentUserDep) -> CurrentUser:
+    if current.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return current
+
+
+AdminDep = Depends(require_admin)

@@ -17,7 +17,12 @@ from sqlalchemy import select
 from app.core.db import init_db, session_scope
 from app.core.security import hash_password
 from app.matching.profiles import upsert_profile
-from app.models import Subscription, Tenant, User
+from app.models import Source, Subscription, Tenant, User
+
+SOURCES = [
+    ("ccgp-zygg", "ccgp", "中国政府采购网·中央公告"),
+    ("jsggzy", "jsggzy", "江苏省公共资源交易平台"),
+]
 
 PROFILE_DATA = {
     "name": "江苏智建工程科技有限公司",
@@ -70,6 +75,14 @@ def main() -> None:
             select(Subscription).where(Subscription.tenant_id == tenant.id)
         ) is None:
             session.add(Subscription(tenant_id=tenant.id, min_star=4))
+        for name, adapter, display_name in SOURCES:
+            source = session.scalar(select(Source).where(Source.name == name))
+            if source is None:
+                session.add(
+                    Source(name=name, adapter=adapter, display_name=display_name, cron="0 * * * *")
+                )
+            elif not source.display_name:
+                source.display_name = display_name  # 为存量数据回填中文名
         if password == "admin123":
             print("⚠ 使用默认密码 admin123（仅限本地开发；生产请设 ADMIN_PASSWORD）")
         print(f"种子租户就绪: #{tenant.id} {tenant.name}（账号 {username}）")

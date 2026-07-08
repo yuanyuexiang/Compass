@@ -28,7 +28,8 @@ class Source(Base):
     __tablename__ = "sources"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)  # 唯一标识（种子幂等/日志用）
+    display_name: Mapped[str | None] = mapped_column(String(128))  # 中文显示名，界面主标签
     adapter: Mapped[str] = mapped_column(String(64))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     cron: Mapped[str | None] = mapped_column(String(64))

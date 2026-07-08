@@ -116,11 +116,14 @@ def crawl_all_sources() -> None:
 
 @celery.task(name="app.tasks.pipeline.crawl_source", max_retries=2, default_retry_delay=300)
 def crawl_source_task(source_id: int) -> None:
+    from datetime import UTC, datetime
+
     with session_scope() as session:
         source = session.get(Source, source_id)
         if source is None or not source.enabled:
             return
         new_ids = run_crawl_source(session, source)
+        source.last_run_at = datetime.now(UTC)
     for ann_id in new_ids:
         fetch_and_clean_task.delay(ann_id)
 

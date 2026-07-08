@@ -48,6 +48,7 @@ class SourceAdapter(ABC):
     """平台适配器基类：内置限速（§10.4 合规）与统一 HTTP 客户端。"""
 
     name: str  # 注册名，与 sources.adapter 对应
+    display_name: str = ""  # 平台中文名（界面展示用），子类必须设置
 
     def __init__(self, config: dict | None = None):
         self.config = config or {}

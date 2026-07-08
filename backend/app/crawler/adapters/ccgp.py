@@ -31,6 +31,7 @@ _META_RE = re.compile(
 @register
 class CcgpAdapter(SourceAdapter):
     name = "ccgp"
+    display_name = "中国政府采购网"
 
     @staticmethod
     def parse_list(html: str, base_url: str) -> list[RawAnnouncement]:

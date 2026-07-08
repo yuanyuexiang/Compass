@@ -58,6 +58,7 @@ def _search_payload(categorynum: str, rows: int) -> dict:
 @register
 class JsggzyAdapter(SourceAdapter):
     name = "jsggzy"
+    display_name = "江苏省公共资源交易平台"
 
     @staticmethod
     def parse_records(data: dict) -> list[RawAnnouncement]:

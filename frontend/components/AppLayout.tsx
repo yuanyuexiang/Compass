@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Avatar, Button, Layout, Menu, Space, Typography } from 'antd';
 import {
   BellOutlined,
+  CloudDownloadOutlined,
   CompassOutlined,
   DashboardOutlined,
   IdcardOutlined,
@@ -24,10 +25,21 @@ const MENU_ITEMS = [
   { key: '/notifications', icon: <MessageOutlined />, label: <Link href="/notifications">通知</Link> },
 ];
 
+const ADMIN_MENU_ITEMS = [
+  { key: '/sources', icon: <CloudDownloadOutlined />, label: <Link href="/sources">采集管理</Link> },
+];
+
+const ADMIN_ROLES = ['tenant_admin', 'platform_admin'];
+
+function menuItemsFor(role: string | undefined) {
+  return ADMIN_ROLES.includes(role ?? '') ? [...MENU_ITEMS, ...ADMIN_MENU_ITEMS] : MENU_ITEMS;
+}
+
 function selectedMenuKey(pathname: string): string {
   if (pathname === '/') return '/';
   if (pathname.startsWith('/projects')) return '/opportunities';
-  const hit = MENU_ITEMS.map((i) => i.key)
+  const hit = [...MENU_ITEMS, ...ADMIN_MENU_ITEMS]
+    .map((i) => i.key)
     .filter((k) => k !== '/')
     .find((k) => pathname.startsWith(k));
   return hit ?? '/';
@@ -85,7 +97,12 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
             <div style={{ color: '#8C9BC4', fontSize: 11 }}>AI 寻标 Agent</div>
           </div>
         </div>
-        <Menu theme="dark" mode="inline" selectedKeys={[selectedMenuKey(pathname)]} items={MENU_ITEMS} />
+        <Menu
+          theme="dark"
+          mode="inline"
+          selectedKeys={[selectedMenuKey(pathname)]}
+          items={menuItemsFor(user?.role)}
+        />
       </Layout.Sider>
       <Layout>
         <Layout.Header

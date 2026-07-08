@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, public, tenant
+from app.api.routes import auth, public, sources, tenant
 
 app = FastAPI(title="Compass API", version="0.2.0")
 
@@ -15,6 +15,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(public.router)
+app.include_router(sources.router)
 app.include_router(tenant.router)
 
 

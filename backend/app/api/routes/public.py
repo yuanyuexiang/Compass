@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep
-from app.models import Announcement, MatchResult, Notification, Project, Source
+from app.models import Announcement, MatchResult, Notification, Project
 
 router = APIRouter(prefix="/api")
 
@@ -101,17 +101,3 @@ def stats(current: CurrentUser = CurrentUserDep) -> dict:
         }
 
 
-@router.get("/sources")
-def list_sources(current: CurrentUser = CurrentUserDep) -> list[dict]:
-    with session_scope() as session:
-        rows = session.scalars(select(Source).order_by(Source.id)).all()
-        return [
-            {
-                "id": s.id,
-                "name": s.name,
-                "adapter": s.adapter,
-                "enabled": s.enabled,
-                "last_run_at": s.last_run_at,
-            }
-            for s in rows
-        ]

@@ -13,10 +13,10 @@ celery.conf.update(
 )
 
 celery.conf.beat_schedule = {
-    # M1 简化：整点全量调度；后续按 sources.cron 逐源调度
-    "crawl-all-sources-hourly": {
+    # 每半小时全量调度；按 sources.cron 逐源精确调度留 V1.x（需 RedBeat）
+    "crawl-all-sources": {
         "task": "app.tasks.pipeline.crawl_all_sources",
-        "schedule": crontab(minute=0),
+        "schedule": crontab(minute="0,30"),
     },
     # 每日商机日报（§7，默认 8:30）
     "daily-digest": {
