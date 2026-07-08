@@ -33,8 +33,7 @@ uv run python scripts/dev_match.py             # 发布+匹配+通知演练
 
 ## CI/CD（GitHub Actions）
 
-- `.github/workflows/ci.yml`：push/PR 触发——后端 ruff+pytest，前端 npm build。
-- `.github/workflows/cd.yml`（Deploy）：master push 触发——构建 backend/frontend 镜像推**阿里云 ACR**（registry.cn-hangzhou.aliyuncs.com/yuanyuexiang，在 workflow env 配置），SSH 到服务器执行 `deploy/deploy.sh`（拉镜像、compose up、幂等建表）。依赖 secrets：DEPLOY_HOST / DEPLOY_USER / DEPLOY_SSH_KEY / REGISTRY_USERNAME / REGISTRY_PASSWORD。
+- 单一流水线 `.github/workflows/ci.yml`（名 CI/CD）：PR 只跑测试（后端 ruff+pytest、前端 build）；master push 时**测试全绿才**构建镜像推**阿里云 ACR**（registry.cn-hangzhou.aliyuncs.com/yuanyuexiang，在 workflow env 配置）并 SSH 部署（`deploy/deploy.sh`：拉镜像、compose up、幂等建表）。依赖 secrets：DEPLOY_HOST / DEPLOY_USER / DEPLOY_SSH_KEY / REGISTRY_USERNAME / REGISTRY_PASSWORD。
 - 服务器侧：部署目录 `/opt/compass`，业务密钥在其 `.env`（首次部署会生成模板并要求填写后重触发）。生产编排见 [deploy/docker-compose.prod.yml](deploy/docker-compose.prod.yml)。
 - **入口经 Traefik**（另一 compose 栈，外部网络 `matrix-net`）：域名 `compass.matrix-net.tech` 经 labels 路由到 frontend:3000，TLS 由 Traefik 终止（entrypoint/certresolver 名可在服务器 .env 覆盖）；API 端口仅绑定服务器回环 127.0.0.1:8300（SSH 隧道调试用）。
 - **生产前端与 API 同源**：浏览器请求 `/api/*` 由 Next 服务端 rewrites 反代到 `api:8000`（构建参数 `NEXT_PUBLIC_API_BASE=""` + `INTERNAL_API_URL`，见 frontend/Dockerfile）；本地开发仍直连 8300。改 API 契约时注意这条链路。

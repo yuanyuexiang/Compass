@@ -3,8 +3,14 @@
 设计意图：画像限定江苏省 → 规则过滤会拦掉外省公告；装修/智能化能力 →
 LLM 精排应给苏州中学改造、工行支行改造高分，给监理/知产代理等低分。
 
-用法：uv run python scripts/dev_seed.py
+用法：
+    本地开发   uv run python scripts/dev_seed.py            # admin / admin123
+    生产服务器 ADMIN_PASSWORD='强密码' docker compose -f docker-compose.prod.yml \
+               --env-file .env run --rm --no-deps -e ADMIN_PASSWORD api \
+               python scripts/dev_seed.py
 """
+
+import os
 
 from sqlalchemy import select
 
@@ -36,6 +42,9 @@ PROFILE_DATA = {
 
 
 def main() -> None:
+    username = os.environ.get("ADMIN_USERNAME", "admin")
+    password = os.environ.get("ADMIN_PASSWORD", "admin123")
+
     init_db()
     with session_scope() as session:
         tenant = session.scalar(select(Tenant).where(Tenant.name == PROFILE_DATA["name"]))
@@ -45,20 +54,25 @@ def main() -> None:
             session.flush()
         upsert_profile(session, tenant.id, PROFILE_DATA)
 
-        if session.scalar(select(User).where(User.username == "admin")) is None:
+        user = session.scalar(select(User).where(User.username == username))
+        if user is None:
             session.add(
                 User(
                     tenant_id=tenant.id,
-                    username="admin",
-                    password_hash=hash_password("admin123"),
+                    username=username,
+                    password_hash=hash_password(password),
                     role="tenant_admin",
                 )
             )
+        else:
+            user.password_hash = hash_password(password)  # 重跑可重置密码
         if session.scalar(
             select(Subscription).where(Subscription.tenant_id == tenant.id)
         ) is None:
             session.add(Subscription(tenant_id=tenant.id, min_star=4))
-        print(f"种子租户就绪: #{tenant.id} {tenant.name}（账号 admin / admin123）")
+        if password == "admin123":
+            print("⚠ 使用默认密码 admin123（仅限本地开发；生产请设 ADMIN_PASSWORD）")
+        print(f"种子租户就绪: #{tenant.id} {tenant.name}（账号 {username}）")
 
 
 if __name__ == "__main__":

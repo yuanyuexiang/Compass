@@ -71,12 +71,17 @@ export default function LoginPage() {
             </Button>
           </Form.Item>
         </Form>
-        <Divider plain style={{ margin: '12px 0' }} />
-        <div style={{ textAlign: 'center' }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            演示账号：admin / admin123
-          </Typography.Text>
-        </div>
+        {/* 演示账号提示仅开发模式显示（生产构建时 NODE_ENV=production，此块被裁掉） */}
+        {process.env.NODE_ENV === 'development' && (
+          <>
+            <Divider plain style={{ margin: '12px 0' }} />
+            <div style={{ textAlign: 'center' }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                演示账号：admin / admin123
+              </Typography.Text>
+            </div>
+          </>
+        )}
       </Card>
     </div>
   );
