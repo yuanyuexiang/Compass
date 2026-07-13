@@ -79,6 +79,57 @@ def render(url: str, wait_selector: str | None = None, timeout_s: float | None =
         context.close()
 
 
+_FETCH_JS = """async (a) => {
+    try {
+        const r = await fetch(a.url, {method: 'POST',
+            headers: {'Content-Type': 'application/json'}, body: JSON.stringify(a.payload)});
+        const t = await r.text();
+        try { return {ok: true, json: JSON.parse(t)}; }
+        catch (e) { return {ok: false, status: r.status, text: t.slice(0, 200)}; }
+    } catch (e) { return {ok: false, error: String(e)}; }
+}"""
+
+
+def fetch_json_via_page(
+    nav_url: str,
+    api_url: str,
+    payloads: list[dict],
+    wait_selector: str | None = None,
+    settle_s: float = 4.0,
+    timeout_s: float | None = None,
+) -> list[dict | None]:
+    """先导航 nav_url 过 JS 挑战（瑞数类反爬），再在同一浏览器上下文里逐个 POST api_url 拿 JSON。
+
+    用于接口型但被 JS 挑战保护的站点（如 jsggzy）：浏览器执行挑战脚本拿到通行 cookie 后，
+    页面内 fetch 携带该 cookie 调数据接口即可放行。返回与 payloads 等长的结果列表，
+    每项为 {ok, json} / {ok:false, ...}；单个失败为 None。
+    """
+    timeout_ms = int((timeout_s or settings.browser_render_timeout) * 1000)
+    context = _new_page()
+    try:
+        page = context.new_page()
+        page.goto(nav_url, wait_until="domcontentloaded", timeout=timeout_ms)
+        if wait_selector:
+            page.wait_for_selector(wait_selector, state="attached", timeout=timeout_ms)
+        else:
+            try:
+                page.wait_for_load_state("networkidle", timeout=timeout_ms)
+            except Exception:
+                pass  # 挑战页可能不进入 networkidle，靠下方 settle 兜底
+        if settle_s:
+            page.wait_for_timeout(int(settle_s * 1000))
+        results: list[dict | None] = []
+        for payload in payloads:
+            try:
+                results.append(page.evaluate(_FETCH_JS, {"url": api_url, "payload": payload}))
+            except Exception as exc:
+                logger.warning("fetch_json_via_page 单次失败: %s", exc)
+                results.append(None)
+        return results
+    finally:
+        context.close()
+
+
 def discover_apis(url: str, timeout_s: float | None = None, max_apis: int = 40) -> list[dict]:
     """网络拦截「探路」：渲染页面并记录其发起的 XHR/fetch 请求（尤其返回 JSON 的），
     帮助摸清动态站点背后的数据接口，便于降级为 httpx 直连（tech-design.md §4.1）。"""

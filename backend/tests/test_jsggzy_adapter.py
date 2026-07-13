@@ -38,3 +38,41 @@ def test_clean_detail_page():
     text = html_to_text(html, JsggzyAdapter().content_selectors())
     assert "苏州实验中学" in text
     assert len(text) > 300
+
+
+def test_browser_mode_default_and_parse(monkeypatch):
+    """默认走浏览器模式：mock fetch_json_via_page 返回接口 JSON，验证按类目解析。"""
+    from app.crawler import browser
+
+    data = json.loads((FIXTURES / "jsggzy_list.json").read_text(encoding="utf-8"))
+    called = {}
+
+    def fake_fetch(nav_url, api_url, payloads, **kw):
+        called["nav"] = nav_url
+        called["n"] = len(payloads)
+        return [{"ok": True, "json": data} for _ in payloads]
+
+    monkeypatch.setattr(browser, "fetch_json_via_page", fake_fetch)
+    # 只配 2 个类目，便于断言 payload 数
+    ad = JsggzyAdapter({"categorynums": ["003001001", "003004002"], "rows_per_category": 3})
+    items = list(ad.list_announcements())
+    assert called["nav"].endswith("/jyxx/tradeInfonew.html")  # 先导航列表页过挑战
+    assert called["n"] == 2  # 两个类目 → 两个 payload
+    assert len(items) == 6  # 每类目解析出 3 条
+    assert items[0].title.startswith("育德路")
+
+
+def test_httpx_fallback_when_disabled(monkeypatch):
+    """use_browser=false 时回退纯 httpx（不碰浏览器）。"""
+    data = json.loads((FIXTURES / "jsggzy_list.json").read_text(encoding="utf-8"))
+
+    class FakeResp:
+        def json(self):
+            return data
+
+    ad = JsggzyAdapter(
+        {"use_browser": False, "categorynums": ["003001001"], "rows_per_category": 3}
+    )
+    monkeypatch.setattr(ad, "post_json", lambda url, payload: FakeResp())
+    items = list(ad.list_announcements())
+    assert len(items) == 3
