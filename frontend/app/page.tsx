@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
   Alert,
@@ -48,6 +48,11 @@ const ADVICE_TAG: Record<Advice, { color: string; icon: ReactNode }> = {
   谨慎参与: { color: 'warning', icon: <ExclamationCircleOutlined /> },
   不建议参与: { color: 'error', icon: <CloseCircleOutlined /> },
 };
+
+/** 「今日重点」入选门槛：高星（≥4）且 AI 建议参与，最多展示前 HERO_MAX 条，其余降级为速览行 */
+const HERO_MIN_STAR = 4;
+const HERO_MAX = 3;
+const isHero = (r: Recommendation) => r.star >= HERO_MIN_STAR && r.advice === '建议参与';
 
 /** 匹配分圆环颜色：>=80 绿、60-79 品牌蓝、<60 灰 */
 function scoreColor(score: number): string {
@@ -252,6 +257,88 @@ function RecommendationCard({
   );
 }
 
+/** 分区小标题：标题 + 计数 + 可选说明 + 右侧分隔线 */
+function SectionLabel({ text, count, hint }: { text: string; count: number; hint?: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: 'rgba(0, 0, 0, 0.88)' }}>{text}</span>
+      <span style={{ fontSize: 13, color: 'rgba(0, 0, 0, 0.35)', fontVariantNumeric: 'tabular-nums' }}>{count}</span>
+      {hint ? <span style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.35)' }}>· {hint}</span> : null}
+      <span style={{ flex: 1, height: 1, background: 'rgba(0, 0, 0, 0.06)' }} />
+    </div>
+  );
+}
+
+/** 速览行：长尾商机一行一条——匹配分 + 星级 + 标题/关键信息 + 风险 + 建议 + 跟进 */
+function CompactRecRow({
+  rec,
+  onFollowChange,
+}: {
+  rec: Recommendation;
+  onFollowChange: (rec: Recommendation, status: FollowStatus) => void;
+}) {
+  const advice = ADVICE_TAG[rec.advice];
+  const hitRisks = RISK_KEYS.filter((k) => rec.risks?.[k]?.hit);
+  return (
+    <div className="rec-crow">
+      <span
+        style={{
+          width: 34,
+          flexShrink: 0,
+          textAlign: 'center',
+          fontSize: 16,
+          fontWeight: 600,
+          fontVariantNumeric: 'tabular-nums',
+          color: scoreColor(rec.match_score),
+        }}
+      >
+        {rec.match_score}
+      </span>
+      <Rate disabled value={rec.star} style={{ fontSize: 11, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <Link
+          href={`/projects/${rec.announcement_id}`}
+          style={{
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: '#2F54EB',
+            fontWeight: 600,
+            fontSize: 14,
+          }}
+        >
+          {rec.title}
+        </Link>
+        <span style={{ flexShrink: 0, color: 'rgba(0, 0, 0, 0.4)', fontSize: 12, whiteSpace: 'nowrap' }}>
+          {rec.region ?? '-'} · {formatBudget(rec.budget)} · 截止 {rec.deadline ?? '-'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        {hitRisks.length ? (
+          <Tooltip title={hitRisks.map((k) => RISK_LABELS[k]).join('、')}>
+            <Tag color="warning" icon={<WarningOutlined />} style={{ marginInlineEnd: 0 }}>
+              {hitRisks.length}
+            </Tag>
+          </Tooltip>
+        ) : null}
+        {advice ? (
+          <Tag color={advice.color} style={{ marginInlineEnd: 0 }}>
+            {rec.advice}
+          </Tag>
+        ) : null}
+        <Select
+          size="small"
+          style={{ width: 96 }}
+          value={rec.follow_status}
+          options={FOLLOW_STATUSES.map((s) => ({ value: s, label: s }))}
+          onChange={(v) => onFollowChange(rec, v)}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { message } = App.useApp();
   const [stats, setStats] = useState<Stats | null>(null);
@@ -303,6 +390,13 @@ export default function DashboardPage() {
     }
   };
 
+  // 分层聚焦：recs 已按 (星级, 匹配分) 降序 → 取前 HERO_MAX 条高价值商机为「今日重点」，其余降级速览行
+  const { heroes, rest } = useMemo(() => {
+    const picked = recs.filter(isHero).slice(0, HERO_MAX);
+    const heroIds = new Set(picked.map((r) => r.id));
+    return { heroes: picked, rest: recs.filter((r) => !heroIds.has(r.id)) };
+  }, [recs]);
+
   const byStatus = stats?.by_status ?? {};
   const totalAnnouncements = Object.values(byStatus).reduce((a, b) => a + b, 0);
 
@@ -350,10 +444,10 @@ export default function DashboardPage() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: 12,
+          marginBottom: 18,
         }}
       >
-        <span style={{ fontSize: 16, fontWeight: 600, color: 'rgba(0, 0, 0, 0.88)' }}>推荐商机</span>
+        <span style={{ fontSize: 17, fontWeight: 600, color: 'rgba(0, 0, 0, 0.88)' }}>推荐商机</span>
         <Space>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
             最低星级
@@ -378,11 +472,28 @@ export default function DashboardPage() {
           <Empty description="暂无推荐商机，采集与匹配运行后将自动出现" />
         </Card>
       ) : (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          {recs.map((rec) => (
-            <RecommendationCard key={String(rec.id)} rec={rec} onFollowChange={changeFollow} />
-          ))}
-        </Space>
+        <>
+          {heroes.length > 0 ? (
+            <div style={{ marginBottom: rest.length > 0 ? 24 : 0 }}>
+              <SectionLabel text="🎯 今日重点" count={heroes.length} hint="AI 建议参与 · 高匹配，优先跟进" />
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                {heroes.map((rec) => (
+                  <RecommendationCard key={String(rec.id)} rec={rec} onFollowChange={changeFollow} />
+                ))}
+              </Space>
+            </div>
+          ) : null}
+          {rest.length > 0 ? (
+            <div>
+              <SectionLabel text="其余商机" count={rest.length} hint="一行一条，快速扫读" />
+              <div className="rec-compact-list">
+                {rest.map((rec) => (
+                  <CompactRecRow key={String(rec.id)} rec={rec} onFollowChange={changeFollow} />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
       )}
     </AppLayout>
   );

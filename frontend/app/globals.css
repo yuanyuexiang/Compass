@@ -177,6 +177,33 @@ a {
   background: #fff7e0;
 }
 
+/* ===== 推荐商机 · 速览行（方案 A 长尾列表：一行一条，可快速扫读） ===== */
+.rec-compact-list {
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 1px 2px rgba(15, 27, 61, 0.04),
+    0 4px 16px rgba(15, 27, 61, 0.06);
+}
+
+.rec-crow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 16px;
+  border-top: 1px solid #f0f0f0;
+  transition: background 0.15s ease;
+}
+
+.rec-crow:first-child {
+  border-top: none;
+}
+
+.rec-crow:hover {
+  background: #f7f9ff;
+}
+
 /* ===== 流水线分段条 ===== */
 .pipeline-bar {
   display: flex;
