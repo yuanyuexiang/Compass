@@ -6,7 +6,7 @@ import {
   App,
   Button,
   Card,
-  Divider,
+  Collapse,
   Empty,
   Form,
   Input,
@@ -75,6 +75,13 @@ interface TestResult {
   detail_preview: { content_excerpt: string; content_length: number } | null;
 }
 
+interface SmartResult extends TestResult {
+  adapter: string;
+  adapter_display_name: string;
+  config: Record<string, unknown> | null;
+  notes?: string;
+}
+
 export default function SourcesPage() {
   const { message } = App.useApp();
   const [items, setItems] = useState<SourceItem[]>([]);
@@ -88,7 +95,9 @@ export default function SourcesPage() {
   const [editing, setEditing] = useState<SourceItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [autoDetecting, setAutoDetecting] = useState(false);
+  const [smartUrl, setSmartUrl] = useState('');
+  const [smartDetecting, setSmartDetecting] = useState(false);
+  const [smartResult, setSmartResult] = useState<SmartResult | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [form] = Form.useForm();
   const watchedAdapter = Form.useWatch('adapter', form);
@@ -191,33 +200,42 @@ export default function SourcesPage() {
     }
   };
 
-  const autoDetect = async () => {
-    const url = form.getFieldValue(['config', 'list_url']);
-    if (!url) {
-      message.warning('请先填写公告列表页网址');
+  const smartDetect = async () => {
+    if (!smartUrl.trim()) {
+      message.warning('请先粘贴招标网站的公告列表页网址');
       return;
     }
-    setAutoDetecting(true);
+    setSmartDetecting(true);
+    setSmartResult(null);
     setTestResult(null);
     try {
-      const r = await apiFetch<TestResult & { config: Record<string, unknown> | null }>(
-        '/api/sources/suggest',
-        { method: 'POST', body: JSON.stringify({ list_url: url }) },
-      );
-      if (r.config) form.setFieldsValue({ config: r.config });
-      setTestResult({ ok: r.ok, error: r.error, items: r.items, detail_preview: r.detail_preview });
-      if (r.ok) message.success('已自动识别并回填配置，请核对下方预览');
-      else if (r.error) message.warning(r.error);
+      const r = await apiFetch<SmartResult>('/api/sources/smart-suggest', {
+        method: 'POST',
+        body: JSON.stringify({ url: smartUrl.trim() }),
+      });
+      setSmartResult(r);
+      if (r.ok) {
+        // 识别成功：回填适配器 + 配置到表单（保存时用），并给中文名兜底
+        form.setFieldsValue({ adapter: r.adapter, config: r.config ?? {} });
+        if (!form.getFieldValue('display_name') && r.adapter_display_name) {
+          form.setFieldsValue({ display_name: r.adapter_display_name });
+        }
+        message.success('识别成功，请核对预览后保存');
+      } else if (r.error) {
+        message.warning(r.error);
+      }
     } catch (e) {
-      message.error(e instanceof Error ? e.message : '自动识别失败');
+      message.error(e instanceof Error ? e.message : '智能识别失败');
     } finally {
-      setAutoDetecting(false);
+      setSmartDetecting(false);
     }
   };
 
   const openModal = (record: SourceItem | null) => {
     setEditing(record);
     setTestResult(null);
+    setSmartResult(null);
+    setSmartUrl('');
     setModalOpen(true);
     form.setFieldsValue(
       record
@@ -429,6 +447,95 @@ export default function SourcesPage() {
           >
             <Input placeholder="如 jsggzy-zfcg" disabled={!!editing} />
           </Form.Item>
+
+          {/* 智能识别：新增数据源时的主流程——贴网址，AI 自动判定平台与采集方式 */}
+          {!editing ? (
+            <div
+              style={{
+                background: 'rgba(47,84,235,.04)',
+                border: '1px solid rgba(47,84,235,.15)',
+                borderRadius: 10,
+                padding: 16,
+                marginBottom: 16,
+              }}
+            >
+              <Space size={8} style={{ marginBottom: 10 }}>
+                <span className="ai-badge">
+                  <RobotOutlined /> AI
+                </span>
+                <Typography.Text strong>智能识别</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  粘贴招标网站的公告列表页网址，自动判定采集方式并生成配置
+                </Typography.Text>
+              </Space>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  placeholder="https://某招标网站/公告列表页"
+                  value={smartUrl}
+                  onChange={(e) => setSmartUrl(e.target.value)}
+                  onPressEnter={smartDetect}
+                />
+                <Button
+                  type="primary"
+                  icon={<RobotOutlined />}
+                  loading={smartDetecting}
+                  onClick={smartDetect}
+                >
+                  智能识别
+                </Button>
+              </Space.Compact>
+              {smartResult ? (
+                smartResult.ok ? (
+                  <Alert
+                    style={{ marginTop: 12 }}
+                    type="success"
+                    showIcon
+                    message={smartResult.notes || '识别成功'}
+                    description={
+                      <div style={{ fontSize: 12 }}>
+                        <div style={{ marginBottom: 4 }}>
+                          采集方式：{smartResult.adapter_display_name}　·　试采{' '}
+                          {smartResult.items.length} 条
+                          {smartResult.detail_preview
+                            ? `　·　首条正文 ${smartResult.detail_preview.content_length} 字`
+                            : ''}
+                        </div>
+                        {smartResult.items.slice(0, 3).map((it, i) => (
+                          <div key={i} style={{ color: 'rgba(0,0,0,.55)' }}>
+                            {it.publish_time ? `[${it.publish_time.slice(0, 10)}] ` : ''}
+                            {it.title}
+                          </div>
+                        ))}
+                      </div>
+                    }
+                  />
+                ) : (
+                  <Alert
+                    style={{ marginTop: 12 }}
+                    type="warning"
+                    showIcon
+                    message="未能自动识别"
+                    description={smartResult.error || '请展开下方「高级设置」手动配置'}
+                  />
+                )
+              ) : null}
+            </div>
+          ) : null}
+
+          <Collapse
+            ghost
+            defaultActiveKey={editing ? ['adv'] : []}
+            style={{ marginBottom: 8 }}
+            items={[
+              {
+                key: 'adv',
+                label: (
+                  <Typography.Text type="secondary">
+                    高级设置（手动选择适配器与选择器，覆盖智能识别结果）
+                  </Typography.Text>
+                ),
+                children: (
+                  <>
           <Form.Item name="adapter" label="平台适配器" rules={[{ required: true, message: '请选择平台' }]}>
             <Select
               placeholder="选择采集平台"
@@ -443,10 +550,6 @@ export default function SourcesPage() {
           <Form.Item name="min_interval_seconds" label="采集限速（每次请求最小间隔，秒）">
             <InputNumber min={1} max={60} style={{ width: 160 }} />
           </Form.Item>
-
-          <Divider orientation="left" style={{ fontSize: 13 }}>
-            采集配置
-          </Divider>
 
           {watchedAdapter === 'ccgp' ? (
             <Form.Item
@@ -477,33 +580,13 @@ export default function SourcesPage() {
           {watchedAdapter === 'generic' || watchedAdapter === 'generic_browser' ? (
             <>
               {watchedAdapter === 'generic' ? (
-                <div
-                  style={{
-                    background: 'rgba(47,84,235,.04)',
-                    border: '1px solid rgba(47,84,235,.15)',
-                    borderRadius: 10,
-                    padding: 16,
-                    marginBottom: 16,
-                  }}
+                <Form.Item
+                  name={['config', 'list_url']}
+                  label="公告列表页网址"
+                  rules={[{ required: true, message: '请输入列表页网址' }]}
                 >
-                  <Space size={8} style={{ marginBottom: 8 }}>
-                    <span className="ai-badge">
-                      <RobotOutlined /> AI
-                    </span>
-                    <Typography.Text strong>自动识别</Typography.Text>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      只需填公告列表页网址，AI 自动分析页面结构并填好下方配置
-                    </Typography.Text>
-                  </Space>
-                  <Space.Compact style={{ width: '100%' }}>
-                    <Form.Item name={['config', 'list_url']} noStyle rules={[{ required: true, message: '请输入列表页网址' }]}>
-                      <Input placeholder="https://某招标网站/公告列表页" />
-                    </Form.Item>
-                    <Button type="primary" icon={<RobotOutlined />} loading={autoDetecting} onClick={autoDetect}>
-                      AI 识别
-                    </Button>
-                  </Space.Compact>
-                </div>
+                  <Input placeholder="https://某招标网站/公告列表页" />
+                </Form.Item>
               ) : (
                 <>
                   <Alert
@@ -584,11 +667,12 @@ export default function SourcesPage() {
                 <Alert type="error" showIcon message="测试失败" description={testResult.error} />
               )
             ) : null}
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              「通用网站」适配器可接入结构规整的静态招标站点（AI 自动识别或手填选择器）；
-              JS 渲染 / 需登录 / 有验证码的站点需联系开发专用适配器。
-            </Typography.Text>
-          </Space>
+                  </Space>
+                  </>
+                ),
+              },
+            ]}
+          />
         </Form>
       </Modal>
     </AppLayout>

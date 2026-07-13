@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 
 from bs4 import BeautifulSoup, Comment
 
@@ -15,8 +16,48 @@ logger = logging.getLogger(__name__)
 
 MAX_HTML_CHARS = 18_000
 MAX_ATTEMPTS = 2
+MIN_VISIBLE_TEXT = 500  # 可见文本低于此值疑似 JS 壳
 
 KEEP_ATTRS = ("class", "id", "href", "title")
+# 混淆脚本特征（瑞数等 JS 挑战反爬常见变量名 _0x1a2b…）
+_OBFUSCATION_RE = re.compile(r"_0x[0-9a-f]{4,}")
+
+
+def looks_dynamic(html: str) -> bool:
+    """页面疑似 JS 动态渲染 / 反爬：可见文本极少，或含混淆脚本特征。
+
+    用于 smart-suggest 判定该走 httpx（静态）还是 Playwright（动态）路线。
+    """
+    if len(_OBFUSCATION_RE.findall(html)) >= 3:
+        return True
+    soup = BeautifulSoup(html, "lxml")
+    for t in soup(["script", "style", "noscript"]):
+        t.decompose()
+    node = soup.body or soup
+    visible = node.get_text(" ", strip=True) if node else ""
+    return len(visible) < MIN_VISIBLE_TEXT
+
+
+def suggest_config_and_items(list_html: str, base_url: str):
+    """给一段列表页 HTML → LLM 生成选择器 → 解析出条目，返回 (config, items)。
+
+    smart-suggest 与旧 suggest 端点共用：静态路线传 httpx 的 HTML，动态路线传渲染后的 HTML。
+    低于 3 条时带反馈重试一次。
+    """
+    from app.crawler.adapters.generic import GenericAdapter
+
+    selectors = suggest_list_selectors(list_html)
+    config = {"list_url": base_url, **selectors}
+    items = GenericAdapter.parse_list(list_html, base_url, config) if selectors else []
+    if len(items) < 3:
+        fb = f"item_selector「{config.get('item_selector')}」只匹配到 {len(items)} 条公告"
+        retry = suggest_list_selectors(list_html, feedback=fb)
+        if retry:
+            retry_config = {"list_url": base_url, **retry}
+            retry_items = GenericAdapter.parse_list(list_html, base_url, retry_config)
+            if len(retry_items) > len(items):
+                config, items = retry_config, retry_items
+    return config, items
 
 
 def compact_html(html: str, max_chars: int = MAX_HTML_CHARS) -> str:
