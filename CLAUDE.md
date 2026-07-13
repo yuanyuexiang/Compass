@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 uv sync                                        # 安装依赖
-uv run pytest                                  # 全部测试（29 个）
+uv run pytest                                  # 全部测试（62 个）
 uv run pytest tests/test_matching.py::test_rule_filter_region   # 单个测试
 uv run ruff check app tests scripts            # Lint（提交前必须通过）
 uv run uvicorn app.api.main:app --port 8300    # API（本机 8000 被占用）
@@ -38,17 +38,18 @@ uv run python scripts/dev_match.py             # 发布+匹配+通知演练
 - **入口经 Traefik**（另一 compose 栈，外部网络 `matrix-net`）：域名 `compass.matrix-net.tech` 经 labels 路由到 frontend:3000，TLS 由 Traefik 终止（entrypoint/certresolver 名可在服务器 .env 覆盖）；API 端口仅绑定服务器回环 127.0.0.1:8300（SSH 隧道调试用）。
 - **生产前端与 API 同源**：浏览器请求 `/api/*` 由 Next 服务端 rewrites 反代到 `api:8000`（构建参数 `NEXT_PUBLIC_API_BASE=""` + `INTERNAL_API_URL`，见 frontend/Dockerfile）；本地开发仍直连 8300。改 API 契约时注意这条链路。
 
-本机开发注意：这台机器的代理会对部分站点做 HTTPS 中间人/fake-IP 拦截——采集报 `CERTIFICATE_VERIFY_FAILED` 时用 `CRAWLER_VERIFY_SSL=false`（仅本机）；deal.ggzy.gov.cn 与江苏政采域名本机不可达（198.18.x），相关适配器须在生产网络开发。
+本机开发注意：采集默认**关闭 SSL 校验**（`crawler_verify_ssl` 默认 `False`，httpx + Playwright 两条链路都生效——政府/公共资源站证书链常年配错，且本机代理会做 HTTPS 中间人/fake-IP 拦截；要强校验则 `.env` 置 `CRAWLER_VERIFY_SSL=true`）；deal.ggzy.gov.cn 与江苏政采域名本机不可达（198.18.x），相关适配器须在生产网络开发。
 
 ## 架构要点（改代码前必读）
 
 - **公共层/租户层分离**：`models/public.py`（公告只处理一次，全租户共享）vs `models/tenant.py`（画像/匹配/订阅/通知，均含 tenant_id）。租户隔离由 `core/security.py` 的 JWT 依赖注入强制——租户层查询必须过滤 `current.tenant_id`。
 - **流水线状态机**：`crawled → cleaned → attachments_parsed → ai_extracted → embedded → published`（+failed），发布后 fan-out 到各租户匹配。业务逻辑写成纯函数 `run_*(session,...)`，Celery 任务只是薄包装（`tasks/pipeline.py`）。
 - **可投标闸门**：`app/opportunity.py` 的 `is_biddable(ann_type, title)` 判定公告阶段——中标/成交/废标类不是"寻标"商机，`publish_task` fan-out 前 + `run_match` 内双重拦截，不匹配不推荐不通知（仍入库、商机查询可检索，留给 V3 分析）。规则关键词判定，中标优先于招标。自动采集用 **tick 模式**：Beat 每分钟跑 `crawl_tick`，按 `system_settings` 里管理员配置的间隔（默认 30 分钟，5–720 可调，改动即时生效、无需重启）决定是否派发；数据源经 `/api/sources`（`api/routes/sources.py`）管理，管理员可在后台"采集管理"页增改/启停/手动触发/调整间隔（写操作用 `AdminDep` 权限依赖）。系统级配置读写用 `app/core/kv.py`。
-- **新增采集平台**：分三档。①结构规整的静态站用 `generic`（`adapters/generic.py`），后台选「通用网站」，**贴网址点 AI 识别**（`ai/suggest.py`）或手填选择器表单，"测试采集"预览后保存，零代码。②JS 动态渲染站用 `generic_browser`（`adapters/generic_browser.py`，继承 generic，取页面改走 Playwright 渲染，见 `crawler/browser.py`），后台选「通用网站（动态渲染/JS）」，配选择器 + 可选 wait_selector。③带强反爬/验证码的硬骨头才写专用 SourceAdapter 子类（`@register` + `adapters/__init__.py` import，解析逻辑放可离线测试的静态方法 + 真实页面 fixture）。适配器内置限速**不得绕过**；只采官方公开源（合规红线见 tech-design §10.4）。相关接口：`POST /api/sources/test`（试采不入库）、`POST /api/sources/suggest`（AI 识别）、`scripts/dev_inspect.py <url>`（探路：列出动态站的 XHR/JSON 接口，摸清后常可降级回 httpx）。前端 config 一律走结构化中文表单，不暴露 JSON。
+- **新增采集平台**：分三档。①结构规整的静态站用 `generic`（`adapters/generic.py`），后台选「通用网站」，**贴网址点 AI 识别**或手填选择器表单，"测试采集"预览后保存，零代码。②JS 动态渲染站用 `generic_browser`（`adapters/generic_browser.py`，继承 generic，取页面改走 Playwright 渲染，见 `crawler/browser.py`），后台选「通用网站（动态渲染/JS）」，配选择器 + 可选 wait_selector。③带强反爬/验证码的硬骨头才写专用 SourceAdapter 子类（`@register` + `adapters/__init__.py` import，解析逻辑放可离线测试的静态方法 + 真实页面 fixture）。适配器内置限速**不得绕过**；只采官方公开源（合规红线见 tech-design §10.4）。相关接口：`POST /api/sources/smart-suggest`（**智能识别**：贴网址一步到位——域名命中 `DOMAIN_ADAPTERS` 走专用适配器，否则用 httpx 判静/动 [`ai/suggest.py` 的 `looks_dynamic`：可见文本极少或含瑞数式混淆脚本即判动态]，动态走 Playwright 渲染，再 LLM 生成选择器并试采，静态 0 条自动转动态重试；前端「AI 识别」按钮走此端点）、`POST /api/sources/suggest`（旧端点，仅按给定 HTML 出选择器建议，`ai/suggest.py`）、`POST /api/sources/test`（试采不入库）、`scripts/dev_inspect.py <url>`（探路：列出动态站的 XHR/JSON 接口，摸清后常可降级回 httpx）。前端 config 一律走结构化中文表单，不暴露 JSON。
 - **Playwright**：`crawler/browser.py` 懒加载共享 chromium（同步 API，Celery worker 用；FastAPI 同步路由经线程池调用，不与事件循环冲突）。`available()` 优雅降级——未装浏览器时渲染类源报错、不影响 httpx 类源。生产镜像已在 `backend/Dockerfile` 装 chromium（约 +400MB，不采动态站可注释该行瘦身）。
 - **LLM 约定**：直接用 LiteLLM（入口 `ai/llm_config.py`），模型 `deepseek-v4-flash`（旧模型名已弃用）。Prompt 一律放 `ai/prompts/` 版本化（该目录豁免行长 lint）。**对 LLM 输出做宽容解析**（历史教训：模型会把字符串字段包成 {value,...} 对象且重试不自愈）——见 `ai/schemas.py`、`matching/schemas.py` 的 field_validator。
 - **匹配三级漏斗**（`matching/engine.py`）：规则（画像 data.filter）→ 向量（无 embedding 自动跳过）→ LLM 评分卡。评分卡含 match_score/star/advice/reasons/六项风险。
+- **自然语言查询**（`ai/nl_search.py`）：商机页搜索框把口语查询交 LLM 解析成结构化 DSL（`POST /api/search/nl`，`api/routes/tenant.py`，前端 opportunities 页），解析失败降级为 `{keyword: 原文}` 关键词搜索，保证有结果。
 - **通知**（`notify/`）：站内信必写兜底，外部渠道（email/企微/钉钉/飞书）按 Subscription.channels 配置驱动，单渠道失败不影响其他。
 
 ## 产品背景速览

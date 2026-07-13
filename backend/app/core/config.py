@@ -40,8 +40,9 @@ class Settings(BaseSettings):
     )
     crawler_timeout_seconds: float = 20.0
     crawler_min_interval_seconds: float = 3.0
-    # 本机代理做 HTTPS MITM 时置 false（仅开发环境；生产必须保持 true）
-    crawler_verify_ssl: bool = True
+    # 采集只读官方公开公告，政府/公共资源站证书链常年配错，默认关闭 SSL 校验放宽采集；
+    # 需强校验（如担心中间人）可在 .env 置 CRAWLER_VERIFY_SSL=true
+    crawler_verify_ssl: bool = False
 
     # Playwright 浏览器渲染（JS 动态站兜底，tech-design §4.1）
     playwright_headless: bool = True
