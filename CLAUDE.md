@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 uv sync                                        # 安装依赖
-uv run pytest                                  # 全部测试（62 个）
+uv run pytest                                  # 全部测试（63 个）
 uv run pytest tests/test_matching.py::test_rule_filter_region   # 单个测试
 uv run ruff check app tests scripts            # Lint（提交前必须通过）
 uv run uvicorn app.api.main:app --port 8300    # API（本机 8000 被占用）

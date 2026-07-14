@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Alert, Button, Card, Empty, Input, Skeleton, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Input, Skeleton, Space, Switch, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { CloseOutlined, RobotOutlined } from '@ant-design/icons';
+import { CloseOutlined, EnvironmentOutlined, RobotOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
 import { formatDateTime, pipelineStatusLabel } from '@/lib/labels';
@@ -28,7 +28,12 @@ export default function OpportunitiesPage() {
   const [nlResult, setNlResult] = useState<NlSearchResult | null>(null);
   const [nlFilters, setNlFilters] = useState<[string, unknown][]>([]);
 
-  const load = useCallback(async (p: number, kw: string, rg: string) => {
+  // 画像「仅关注地区」：默认按其过滤商机查询（与推荐口径统一），可切到全部地区
+  const [profileRegions, setProfileRegions] = useState<string[]>([]);
+  const [onlyMyRegion, setOnlyMyRegion] = useState(true);
+  const regionScoped = profileRegions.length > 0 && !profileRegions.includes('全国');
+
+  const load = useCallback(async (p: number, kw: string, rg: string, onlyRegion: boolean) => {
     setLoading(true);
     setError(null);
     try {
@@ -38,6 +43,7 @@ export default function OpportunitiesPage() {
       });
       if (kw) params.set('keyword', kw);
       if (rg) params.set('region', rg);
+      if (!onlyRegion) params.set('all_regions', 'true');
       const data = await apiFetch<AnnouncementList>(`/api/announcements?${params.toString()}`);
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);
@@ -52,23 +58,32 @@ export default function OpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    load(1, '', '');
+    load(1, '', '', true);
   }, [load]);
+
+  // 拉画像「仅关注地区」用于开关展示；过滤本身由后端按画像执行，此处不影响正确性
+  useEffect(() => {
+    apiFetch<{ filter?: { regions?: string[] } }>('/api/profile')
+      .then((p) => setProfileRegions(p.filter?.regions ?? []))
+      .catch(() => {
+        // 画像拉取失败时隐藏开关，退化为后端默认行为
+      });
+  }, []);
 
   const doSearch = () => {
     setNlResult(null);
     setPage(1);
-    load(1, keyword, region);
+    load(1, keyword, region, onlyMyRegion);
   };
 
-  const doNlSearch = async (q: string) => {
+  const doNlSearch = async (q: string, onlyRegion = onlyMyRegion) => {
     if (!q.trim()) return;
     setNlLoading(true);
     setError(null);
     try {
       const data = await apiFetch<NlSearchResult>('/api/search/nl', {
         method: 'POST',
-        body: JSON.stringify({ query: q.trim() }),
+        body: JSON.stringify({ query: q.trim(), all_regions: !onlyRegion }),
       });
       setNlResult(data);
       setNlFilters(
@@ -86,6 +101,17 @@ export default function OpportunitiesPage() {
   const exitNl = () => {
     setNlResult(null);
     setNlFilters([]);
+  };
+
+  // 切换地区范围：同时作用于普通列表与 AI 搜索，保持两种模式口径一致
+  const toggleRegion = (v: boolean) => {
+    setOnlyMyRegion(v);
+    if (nlResult) {
+      doNlSearch(nlQuery, v);
+    } else {
+      setPage(1);
+      load(1, keyword, region, v);
+    }
   };
 
   const columns: ColumnsType<AnnouncementItem> = [
@@ -155,7 +181,7 @@ export default function OpportunitiesPage() {
                 loading={nlLoading}
                 value={nlQuery}
                 onChange={(e) => setNlQuery(e.target.value)}
-                onSearch={doNlSearch}
+                onSearch={(v) => doNlSearch(v)}
                 allowClear
               />
               {nlResult ? (
@@ -190,6 +216,31 @@ export default function OpportunitiesPage() {
             </Space>
           </div>
         </div>
+
+        {regionScoped ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+              padding: '0 4px',
+            }}
+          >
+            <Switch size="small" checked={onlyMyRegion} onChange={toggleRegion} />
+            <Typography.Text style={{ fontSize: 13 }}>仅看关注地区</Typography.Text>
+            <Space size={4} wrap>
+              {profileRegions.map((r) => (
+                <Tag key={r} color={onlyMyRegion ? 'blue' : 'default'} icon={<EnvironmentOutlined />}>
+                  {r}
+                </Tag>
+              ))}
+            </Space>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {onlyMyRegion ? '与推荐口径一致，只显示画像关注地区的商机' : '已放开限制，显示全部地区'}
+            </Typography.Text>
+          </div>
+        ) : null}
 
         <Card
           className="compass-card"
@@ -250,7 +301,7 @@ export default function OpportunitiesPage() {
                       showTotal: (t) => `共 ${t} 条`,
                       onChange: (p) => {
                         setPage(p);
-                        load(p, keyword, region);
+                        load(p, keyword, region, onlyMyRegion);
                       },
                     }
               }

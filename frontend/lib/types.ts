@@ -78,12 +78,14 @@ export interface AnnouncementItem {
 export interface AnnouncementList {
   items: AnnouncementItem[];
   total: number;
+  region_scope?: string[];
 }
 
 export interface NlSearchResult {
   filters: Record<string, unknown>;
   items: AnnouncementItem[];
   total: number;
+  region_scope?: string[];
 }
 
 export interface FieldValue {

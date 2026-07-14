@@ -2,13 +2,13 @@
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 from app.ai.nl_search import parse_query
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep
 from app.matching.engine import parse_budget_yuan
-from app.matching.profiles import upsert_profile
+from app.matching.profiles import get_filter_regions, region_filter_clause, upsert_profile
 from app.models import (
     Announcement,
     CompanyProfile,
@@ -179,6 +179,7 @@ def mark_read(notification_id: int, current: CurrentUser = CurrentUserDep) -> di
 
 class NlSearchIn(BaseModel):
     query: str
+    all_regions: bool = False
 
 
 @router.post("/search/nl")
@@ -194,15 +195,15 @@ def nl_search(body: NlSearchIn, current: CurrentUser = CurrentUserDep) -> dict:
         )
         if keyword := filters.get("keyword"):
             stmt = stmt.where(Announcement.title.ilike(f"%{keyword}%"))
-        if region := filters.get("region"):
-            # 列表元数据的 region 可能只有地市名，结构化字段 region 为「省/市」——两处都查
-            pattern = f"%{region.rstrip('省市')}%"
-            stmt = stmt.where(
-                or_(
-                    Announcement.region.ilike(pattern),
-                    Project.fields["region"]["value"].astext.ilike(pattern),
-                )
-            )
+        # 地区口径与推荐/普通查询统一：句子里说了地区就用它，否则默认画像「仅关注地区」
+        if nl_region := filters.get("region"):
+            active_regions = [nl_region]
+        elif not body.all_regions:
+            active_regions = get_filter_regions(session, current.tenant_id)
+        else:
+            active_regions = []
+        if (clause := region_filter_clause(active_regions)) is not None:
+            stmt = stmt.where(clause)
         rows = session.execute(stmt).all()
 
         items = []
@@ -225,4 +226,9 @@ def nl_search(body: NlSearchIn, current: CurrentUser = CurrentUserDep) -> dict:
                     "summary": project.summary if project else None,
                 }
             )
-        return {"filters": filters, "items": items[:50], "total": len(items)}
+        return {
+            "filters": filters,
+            "items": items[:50],
+            "total": len(items),
+            "region_scope": active_regions,
+        }

@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep
+from app.matching.profiles import get_filter_regions, region_filter_clause
 from app.models import Announcement, MatchResult, Notification, Project
 
 router = APIRouter(prefix="/api")
@@ -28,23 +29,38 @@ def list_announcements(
     keyword: str | None = None,
     region: str | None = None,
     status: str | None = None,
+    all_regions: bool = False,
     limit: int = Query(default=20, le=100),
     offset: int = 0,
     current: CurrentUser = CurrentUserDep,
 ) -> dict:
     with session_scope() as session:
-        stmt = select(Announcement)
+        # outer join Project：地区过滤需匹配结构化字段 region（与推荐/NL 搜索同源）
+        stmt = select(Announcement).join(
+            Project, Project.announcement_id == Announcement.id, isouter=True
+        )
         if keyword:
             stmt = stmt.where(Announcement.title.ilike(f"%{keyword}%"))
+        # 地区口径：显式地区参数优先；否则默认按画像「仅关注地区」；all_regions=True 时不限制
         if region:
-            stmt = stmt.where(Announcement.region.ilike(f"%{region}%"))
+            active_regions = [region]
+        elif not all_regions:
+            active_regions = get_filter_regions(session, current.tenant_id)
+        else:
+            active_regions = []
+        if (clause := region_filter_clause(active_regions)) is not None:
+            stmt = stmt.where(clause)
         if status:
             stmt = stmt.where(Announcement.status == status)
         total = session.scalar(select(func.count()).select_from(stmt.subquery()))
         rows = session.scalars(
             stmt.order_by(Announcement.publish_time.desc().nullslast()).limit(limit).offset(offset)
         ).all()
-        return {"items": [announcement_out(a) for a in rows], "total": total}
+        return {
+            "items": [announcement_out(a) for a in rows],
+            "total": total,
+            "region_scope": active_regions,
+        }
 
 
 @router.get("/projects/{announcement_id}")

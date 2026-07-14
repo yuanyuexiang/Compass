@@ -36,6 +36,25 @@ def test_rule_filter_region():
     assert ok
 
 
+def test_region_filter_clause():
+    """商机查询的地区过滤条件——与画像/推荐口径统一（app.matching.profiles.region_filter_clause）。"""
+    from sqlalchemy.dialects import postgresql
+
+    from app.matching.profiles import region_filter_clause
+
+    # 空列表 / 含「全国」→ 不加地区限制
+    assert region_filter_clause([]) is None
+    assert region_filter_clause(["全国"]) is None
+    assert region_filter_clause(["全国", "江苏省"]) is None
+
+    # 多地区 → OR；去「省/市」后缀；列表元数据 region 与结构化字段 region 两处都匹配
+    clause = region_filter_clause(["江苏省", "浙江省"])
+    assert clause is not None
+    sql = str(clause.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "%江苏%" in sql and "%浙江%" in sql  # 已去掉「省」后缀
+    assert sql.lower().count("ilike") == 4  # 2 地区 × 2 字段
+
+
 def test_rule_filter_budget_and_category():
     profile = {"filter": {"min_budget": 1_000_000, "exclude_mains": ["服务类"]}}
     ok, reason = rule_filter(FakeProject(budget="50万元"), profile)
