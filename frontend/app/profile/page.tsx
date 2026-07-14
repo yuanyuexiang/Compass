@@ -1,11 +1,32 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, App, Button, Card, Col, Form, Input, InputNumber, Row, Select, Skeleton, Space } from 'antd';
-import { SaveOutlined } from '@ant-design/icons';
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  Row,
+  Select,
+  Skeleton,
+  Space,
+  Tag,
+  Typography,
+} from 'antd';
+import { RobotOutlined, SaveOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
-import type { ProfileData } from '@/lib/types';
+import type { ProfileData, ProfileSuggestResult } from '@/lib/types';
+
+const CONFIDENCE_TAG: Record<string, { color: string; label: string }> = {
+  high: { color: 'green', label: '可信度高' },
+  medium: { color: 'orange', label: '可信度中' },
+  low: { color: 'red', label: '可信度低' },
+};
 
 const TAG_FIELDS: { name: keyof ProfileData; label: string; placeholder: string }[] = [
   { name: 'products', label: '主要产品', placeholder: '输入后回车添加，如：视频会议终端' },
@@ -22,6 +43,33 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // AI 生成画像：输入企业名 → 联网整理草稿 → 预填表单，用户核对后再保存
+  const [aiName, setAiName] = useState('');
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestMeta, setSuggestMeta] = useState<Omit<ProfileSuggestResult, 'draft'> | null>(null);
+
+  const runSuggest = async () => {
+    const name = aiName.trim();
+    if (!name) {
+      message.warning('请先输入企业名称');
+      return;
+    }
+    setSuggesting(true);
+    try {
+      const r = await apiFetch<ProfileSuggestResult>('/api/profile/suggest', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      form.setFieldsValue(r.draft);
+      setSuggestMeta({ sources: r.sources, confidence: r.confidence, note: r.note });
+      message.success('已生成画像草稿，请核对补充后保存');
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   useEffect(() => {
     apiFetch<ProfileData>('/api/profile')
@@ -88,6 +136,54 @@ export default function ProfilePage() {
       <div style={{ display: loading ? 'none' : undefined }}>
         <Form<ProfileData> form={form} layout="vertical" onFinish={onFinish}>
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Card className="compass-card" title={<span><RobotOutlined style={{ color: '#2F54EB', marginRight: 6 }} />AI 生成画像</span>}>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  placeholder="输入企业全称，AI 自动联网整理画像草稿"
+                  value={aiName}
+                  onChange={(e) => setAiName(e.target.value)}
+                  onPressEnter={runSuggest}
+                  allowClear
+                />
+                <Button type="primary" icon={<RobotOutlined />} loading={suggesting} onClick={runSuggest}>
+                  AI 生成
+                </Button>
+              </Space.Compact>
+              {suggestMeta ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginTop: 12 }}
+                  message={
+                    <Space size={8} wrap>
+                      <Tag color={CONFIDENCE_TAG[suggestMeta.confidence]?.color ?? 'blue'}>
+                        {CONFIDENCE_TAG[suggestMeta.confidence]?.label ?? suggestMeta.confidence}
+                      </Tag>
+                      <span>{suggestMeta.note}</span>
+                    </Space>
+                  }
+                  description={
+                    suggestMeta.sources.length ? (
+                      <Space size={[8, 4]} wrap>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          来源：
+                        </Typography.Text>
+                        {suggestMeta.sources.map((s, i) => (
+                          <a key={s} href={s} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+                            链接{i + 1}
+                          </a>
+                        ))}
+                      </Space>
+                    ) : null
+                  }
+                />
+              ) : (
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 10 }}>
+                  草稿会填入下方表单，你可修改后再保存；未搜到的字段留空，需手动补充。「仅关注地区/最低预算」属经营决策，请自行设置。
+                </Typography.Text>
+              )}
+            </Card>
+
             <Card className="compass-card" title="基本信息">
               <Row gutter={24}>
                 <Col xs={24} md={12}>

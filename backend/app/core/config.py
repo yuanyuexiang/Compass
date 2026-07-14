@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     siliconflow_api_key: str = ""
     embedding_model: str = "openai/BAAI/bge-m3"
     embedding_dim: int = 1024
+    # 秘塔 AI 搜索（AI 企业画像联网检索用）；未配置则自动生成画像功能优雅降级
+    metaso_api_key: str = ""
 
     # 认证（§10.3）
     jwt_secret: str = "compass-dev-secret-change-in-prod"

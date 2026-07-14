@@ -134,6 +134,14 @@ export interface ProfileData {
   };
 }
 
+/** AI 生成画像草稿（POST /api/profile/suggest）：draft 预填表单，不含 filter（经营决策手填） */
+export interface ProfileSuggestResult {
+  draft: Partial<ProfileData>;
+  sources: string[];
+  confidence: 'high' | 'medium' | 'low' | string;
+  note: string;
+}
+
 export interface EmailChannel {
   enabled: boolean;
   address: string;

@@ -1,10 +1,14 @@
 """租户层接口：推荐、跟进、画像、订阅、通知、NL 搜索。全部按 tenant_id 强制隔离。"""
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.ai import websearch
 from app.ai.nl_search import parse_query
+from app.ai.profile_suggest import suggest_profile
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep
 from app.matching.engine import parse_budget_yuan
@@ -19,6 +23,7 @@ from app.models import (
 )
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 FOLLOW_STATUSES = ("待看", "跟进中", "放弃", "已投标")
 
@@ -102,6 +107,27 @@ def put_profile(body: dict, current: CurrentUser = CurrentUserDep) -> dict:
     with session_scope() as session:
         upsert_profile(session, current.tenant_id, data)
         return {"ok": True}
+
+
+class ProfileSuggestIn(BaseModel):
+    name: str
+
+
+@router.post("/profile/suggest")
+def profile_suggest(body: ProfileSuggestIn, current: CurrentUser = CurrentUserDep) -> dict:
+    """AI 企业画像草稿：企业名 → 联网搜索 → LLM 整理（不落库，供前端预填后人工确认再保存）。"""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="请输入企业名称")
+    if not websearch.available():
+        raise HTTPException(
+            status_code=400, detail="未配置联网搜索（METASO_API_KEY），无法自动生成，请手动填写画像"
+        )
+    try:
+        return suggest_profile(name)
+    except Exception as exc:
+        logger.exception("AI 画像生成失败")
+        raise HTTPException(status_code=502, detail=f"生成画像失败：{exc}") from exc
 
 
 DEFAULT_CHANNELS = {

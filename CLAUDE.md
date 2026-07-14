@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **V1 全链路已跑通**：采集（ccgp + 江苏公共资源两源）→ 清洗/附件 → DeepSeek 十二字段提取 → 发布 → 三级漏斗匹配（规则→[向量]→LLM 评分卡+六项风险）→ 订阅通知（站内信实测）→ Next.js 管理后台（7 页面）。产品需求见 [prd.md](prd.md)，技术方案见 [tech-design.md](tech-design.md)（架构/选型问题先查它；附录 D–G 是实测记录与遗留项清单，**开工前必读附录 G**）。
 
-密钥在 `backend/.env`（已 gitignore）：DEEPSEEK_API_KEY 已配；SILICONFLOW_API_KEY 未配 → 向量化自动跳过、匹配退化为二级漏斗，配上即恢复三级。
+密钥在 `backend/.env`（已 gitignore）：DEEPSEEK_API_KEY 已配；SILICONFLOW_API_KEY 未配 → 向量化自动跳过、匹配退化为二级漏斗，配上即恢复三级。METASO_API_KEY（秘塔 AI 搜索）供「AI 生成画像」联网检索，未配则该功能优雅降级（按钮报错、不影响其他）。
 
 ## 常用命令
 
@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 uv sync                                        # 安装依赖
-uv run pytest                                  # 全部测试（63 个）
+uv run pytest                                  # 全部测试（67 个）
 uv run pytest tests/test_matching.py::test_rule_filter_region   # 单个测试
 uv run ruff check app tests scripts            # Lint（提交前必须通过）
 uv run uvicorn app.api.main:app --port 8300    # API（本机 8000 被占用）
@@ -49,7 +49,8 @@ uv run python scripts/dev_match.py             # 发布+匹配+通知演练
 - **Playwright**：`crawler/browser.py` 懒加载共享 chromium（同步 API，Celery worker 用；FastAPI 同步路由经线程池调用，不与事件循环冲突）。`available()` 优雅降级——未装浏览器时渲染类源报错、不影响 httpx 类源。生产镜像已在 `backend/Dockerfile` 装 chromium（约 +400MB，不采动态站可注释该行瘦身）。
 - **LLM 约定**：直接用 LiteLLM（入口 `ai/llm_config.py`），模型 `deepseek-v4-flash`（旧模型名已弃用）。Prompt 一律放 `ai/prompts/` 版本化（该目录豁免行长 lint）。**对 LLM 输出做宽容解析**（历史教训：模型会把字符串字段包成 {value,...} 对象且重试不自愈）——见 `ai/schemas.py`、`matching/schemas.py` 的 field_validator。
 - **匹配三级漏斗**（`matching/engine.py`）：规则（画像 data.filter）→ 向量（无 embedding 自动跳过）→ LLM 评分卡。评分卡含 match_score/star/advice/reasons/六项风险。
-- **自然语言查询**（`ai/nl_search.py`）：商机页搜索框把口语查询交 LLM 解析成结构化 DSL（`POST /api/search/nl`，`api/routes/tenant.py`，前端 opportunities 页），解析失败降级为 `{keyword: 原文}` 关键词搜索，保证有结果。
+- **自然语言查询**（`ai/nl_search.py`）：商机页搜索框把口语查询交 LLM 解析成结构化 DSL（`POST /api/search/nl`，`api/routes/tenant.py`，前端 opportunities 页），解析失败降级为 `{keyword: 原文}` 关键词搜索，保证有结果。商机查询（普通+NL）默认按画像 `filter.regions` 过滤地区（与推荐口径统一，共享 `matching/profiles.py` 的 `region_filter_clause`），前端有「仅看关注地区」开关可放开。
+- **AI 企业画像**（`ai/profile_suggest.py` + `ai/websearch.py`）：画像页输入企业名 → 秘塔 AI 搜索联网检索（`POST /api/v1/search`，滤除天眼查/企查查等聚合平台守合规红线）→ LLM 整理成草稿（`POST /api/profile/suggest`，**不落库**，仅预填表单供人工确认，防幻觉）→ 用户改后走 `PUT /api/profile` 存。只产描述性字段，`filter`（关注地区/最低预算）属经营决策手填。
 - **通知**（`notify/`）：站内信必写兜底，外部渠道（email/企微/钉钉/飞书）按 Subscription.channels 配置驱动，单渠道失败不影响其他。
 
 ## 产品背景速览
