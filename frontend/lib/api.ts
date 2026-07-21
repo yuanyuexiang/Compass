@@ -20,6 +20,8 @@ export function setSession(token: string, user: unknown): void {
 export function clearSession(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  // 页面级会话态（如商机查询的筛选条件）随账号退出一并清理
+  sessionStorage.clear();
 }
 
 export function getCachedUser<T>(): T | null {

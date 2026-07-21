@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Alert, Button, Card, Empty, Input, Skeleton, Space, Switch, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -11,6 +11,27 @@ import { formatDateTime, pipelineStatusLabel } from '@/lib/labels';
 import type { AnnouncementItem, AnnouncementList, NlSearchResult } from '@/lib/types';
 
 const PAGE_SIZE = 10;
+
+// 进详情页返回后恢复查询条件/页码/AI 搜索结果（会话级，关标签页即清）
+const STATE_KEY = 'compass-opportunities-state';
+
+type SavedState = {
+  keyword?: string;
+  region?: string;
+  page?: number;
+  onlyMyRegion?: boolean;
+  nlQuery?: string;
+  nlResult?: NlSearchResult | null;
+  nlFilters?: [string, unknown][];
+};
+
+function readSavedState(): SavedState {
+  try {
+    return JSON.parse(sessionStorage.getItem(STATE_KEY) ?? '{}') as SavedState;
+  } catch {
+    return {};
+  }
+}
 
 export default function OpportunitiesPage() {
   const router = useRouter();
@@ -58,8 +79,33 @@ export default function OpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    load(1, '', '', true);
+    const saved = readSavedState();
+    const p = saved.page && saved.page > 0 ? saved.page : 1;
+    const kw = saved.keyword ?? '';
+    const rg = saved.region ?? '';
+    const only = saved.onlyMyRegion ?? true;
+    setKeyword(kw);
+    setRegion(rg);
+    setPage(p);
+    setOnlyMyRegion(only);
+    if (saved.nlResult) {
+      setNlQuery(saved.nlQuery ?? '');
+      setNlResult(saved.nlResult);
+      setNlFilters(saved.nlFilters ?? []);
+    }
+    load(p, kw, rg, only);
   }, [load]);
+
+  // 状态变化即存 sessionStorage；跳过首次（恢复前的默认值），避免覆盖已存条件
+  const skipFirstSave = useRef(true);
+  useEffect(() => {
+    if (skipFirstSave.current) {
+      skipFirstSave.current = false;
+      return;
+    }
+    const state: SavedState = { keyword, region, page, onlyMyRegion, nlQuery, nlResult, nlFilters };
+    sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
+  }, [keyword, region, page, onlyMyRegion, nlQuery, nlResult, nlFilters]);
 
   // 拉画像「仅关注地区」用于开关展示；过滤本身由后端按画像执行，此处不影响正确性
   useEffect(() => {
