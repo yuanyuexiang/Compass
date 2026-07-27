@@ -47,7 +47,10 @@ export interface LoginResponse {
 }
 
 export interface Stats {
-  by_status: Record<string, number>;
+  /** 流水线明细：仅平台管理员返回 */
+  by_status?: Record<string, number>;
+  /** 租户可见公告数（画像地区 + 关注数据源口径，与商机查询一致） */
+  visible_announcements?: number;
   tenant?: {
     today_recommended: number;
     unread: number;

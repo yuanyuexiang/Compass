@@ -91,12 +91,19 @@ def project_detail(announcement_id: int, current: CurrentUser = CurrentUserDep) 
 
 @router.get("/stats")
 def stats(current: CurrentUser = CurrentUserDep) -> dict:
+    """工作台统计。流水线明细（by_status）是平台运营指标，仅平台管理员可见；
+    租户看「可见公告数」——与商机查询同口径（画像地区 + 关注数据源）。"""
     with session_scope() as session:
-        by_status = dict(
-            session.execute(
-                select(Announcement.status, func.count()).group_by(Announcement.status)
-            ).all()
+        visible_stmt = select(Announcement.id).join(
+            Project, Project.announcement_id == Announcement.id, isouter=True
         )
+        if (
+            clause := region_filter_clause(get_filter_regions(session, current.tenant_id))
+        ) is not None:
+            visible_stmt = visible_stmt.where(clause)
+        if source_ids := get_watched_source_ids(session, current.tenant_id):
+            visible_stmt = visible_stmt.where(Announcement.source_id.in_(source_ids))
+        visible = session.scalar(select(func.count()).select_from(visible_stmt.subquery()))
         today_recommended = session.scalar(
             select(func.count())
             .select_from(MatchResult)
@@ -114,9 +121,16 @@ def stats(current: CurrentUser = CurrentUserDep) -> dict:
                 Notification.read.is_(False),
             )
         )
-        return {
-            "by_status": by_status,
+        out = {
+            "visible_announcements": visible,
             "tenant": {"today_recommended": today_recommended, "unread": unread},
         }
+        if current.role == "platform_admin":
+            out["by_status"] = dict(
+                session.execute(
+                    select(Announcement.status, func.count()).group_by(Announcement.status)
+                ).all()
+            )
+        return out
 
 

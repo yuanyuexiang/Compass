@@ -397,8 +397,9 @@ export default function DashboardPage() {
     return { heroes: picked, rest: recs.filter((r) => !heroIds.has(r.id)) };
   }, [recs]);
 
-  const byStatus = stats?.by_status ?? {};
-  const totalAnnouncements = Object.values(byStatus).reduce((a, b) => a + b, 0);
+  // by_status 仅平台管理员返回：有 → 展示全局总量与流水线；无 → 展示租户口径的可见公告数
+  const byStatus = stats?.by_status;
+  const totalAnnouncements = Object.values(byStatus ?? {}).reduce((a, b) => a + b, 0);
 
   return (
     <AppLayout title="商机工作台" subtitle="AI 为您主动发现并评估的招标商机">
@@ -425,9 +426,9 @@ export default function DashboardPage() {
         </Col>
         <Col xs={24} sm={8}>
           <StatTile
-            label="公告总量"
-            value={stats ? totalAnnouncements : '—'}
-            helper="全流水线累计采集公告数"
+            label={byStatus ? '公告总量' : '可见公告'}
+            value={stats ? (byStatus ? totalAnnouncements : stats.visible_announcements ?? '—') : '—'}
+            helper={byStatus ? '全流水线累计采集公告数' : '按你的关注地区与数据源统计'}
             icon={<DatabaseOutlined />}
             iconBg="rgba(47, 84, 235, 0.08)"
             iconColor="#2F54EB"
@@ -435,9 +436,11 @@ export default function DashboardPage() {
         </Col>
       </Row>
 
-      <Card className="compass-card" title="处理流水线" size="small" style={{ marginBottom: 24 }}>
-        <PipelineBar byStatus={byStatus} />
-      </Card>
+      {byStatus ? (
+        <Card className="compass-card" title="处理流水线" size="small" style={{ marginBottom: 24 }}>
+          <PipelineBar byStatus={byStatus} />
+        </Card>
+      ) : null}
 
       <div
         style={{
