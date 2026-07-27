@@ -41,9 +41,13 @@ interface SourceItem {
   adapter: string;
   adapter_display_name: string;
   enabled: boolean;
+  status: 'pending' | 'active' | 'rejected';
+  reject_reason: string | null;
+  requested_by: string | null;
   min_interval_seconds: number;
   config: Record<string, unknown>;
   last_run_at: string | null;
+  created_at: string | null;
   announcement_count: number;
 }
 
@@ -83,7 +87,7 @@ interface SmartResult extends TestResult {
 }
 
 export default function SourcesPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [items, setItems] = useState<SourceItem[]>([]);
   const [adapters, setAdapters] = useState<AdapterItem[]>([]);
   const [schedule, setSchedule] = useState<ScheduleInfo | null>(null);
@@ -163,6 +167,53 @@ export default function SourcesPage() {
     } catch (e) {
       message.error(e instanceof Error ? e.message : '触发失败');
     }
+  };
+
+  const approveSource = async (record: SourceItem) => {
+    try {
+      await apiFetch(`/api/sources/${record.id}/approve`, { method: 'POST' });
+      message.success(`「${record.display_name}」已批准，开始参与采集`);
+      load();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const rejectSource = async (record: SourceItem) => {
+    let reason = '';
+    modal.confirm({
+      title: `驳回申请「${record.display_name}」`,
+      content: (
+        <Input.TextArea
+          rows={3}
+          maxLength={500}
+          placeholder="驳回理由（申请企业可见），例：非官方公开采购平台，暂不接入"
+          onChange={(e) => {
+            reason = e.target.value;
+          }}
+        />
+      ),
+      okText: '驳回',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        if (!reason.trim()) {
+          message.warning('请填写驳回理由');
+          return Promise.reject();
+        }
+        try {
+          await apiFetch(`/api/sources/${record.id}/reject`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: reason.trim() }),
+          });
+          message.success('已驳回');
+          load();
+        } catch (e) {
+          message.error((e as Error).message);
+          return Promise.reject();
+        }
+      },
+    });
   };
 
   const deleteSource = async (record: SourceItem) => {
@@ -290,6 +341,9 @@ export default function SourcesPage() {
     }
   };
 
+  const pendingItems = items.filter((i) => i.status === 'pending');
+  const listedItems = items.filter((i) => i.status !== 'pending');
+
   const columns: ColumnsType<SourceItem> = [
     {
       title: '数据源',
@@ -310,11 +364,31 @@ export default function SourcesPage() {
       render: (v: string, record) => <Tag color="geekblue">{v || record.adapter}</Tag>,
     },
     {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 90,
+      render: (v: SourceItem['status'], record) =>
+        v === 'rejected' ? (
+          <Tooltip title={record.reject_reason || ''}>
+            <Tag color="red">已驳回</Tag>
+          </Tooltip>
+        ) : (
+          <Tag color="green">生效</Tag>
+        ),
+    },
+    {
       title: '启用',
       dataIndex: 'enabled',
       key: 'enabled',
       width: 80,
-      render: (v: boolean, record) => <Switch checked={v} onChange={(c) => toggleEnabled(record, c)} />,
+      render: (v: boolean, record) => (
+        <Switch
+          checked={v}
+          disabled={record.status !== 'active'}
+          onChange={(c) => toggleEnabled(record, c)}
+        />
+      ),
     },
     {
       title: '上次采集',
@@ -395,6 +469,86 @@ export default function SourcesPage() {
           </Typography.Text>
         </Space>
       </Card>
+      {pendingItems.length > 0 ? (
+        <Card
+          className="compass-card"
+          title={
+            <Space size={8}>
+              <span>待审批申请</span>
+              <Tag color="gold">{pendingItems.length}</Tag>
+            </Space>
+          }
+          style={{ marginBottom: 16 }}
+        >
+          <Table<SourceItem>
+            rowKey="id"
+            size="middle"
+            pagination={false}
+            dataSource={pendingItems}
+            columns={[
+              {
+                title: '平台名称',
+                dataIndex: 'display_name',
+                render: (v: string, r) => (
+                  <div>
+                    <strong>{v}</strong>
+                    <div style={{ fontSize: 12, color: 'rgba(0,0,0,.45)' }}>
+                      {String(r.config?.url ?? '')}
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                title: '申请企业',
+                dataIndex: 'requested_by',
+                width: 200,
+                render: (v: string | null) => v ?? '-',
+              },
+              {
+                title: '申请说明',
+                key: 'note',
+                ellipsis: true,
+                render: (_, r) => String(r.config?.request_note ?? '') || '-',
+              },
+              {
+                title: '申请时间',
+                dataIndex: 'created_at',
+                width: 150,
+                render: (v: string | null) => formatDateTime(v),
+              },
+              {
+                title: '操作',
+                key: 'actions',
+                width: 250,
+                render: (_, r) => (
+                  <Space>
+                    <Button size="small" onClick={() => openModal(r)}>
+                      配置并测试
+                    </Button>
+                    <Popconfirm
+                      title={`批准「${r.display_name}」？通过后立即参与采集`}
+                      okText="批准"
+                      cancelText="取消"
+                      onConfirm={() => approveSource(r)}
+                    >
+                      <Button size="small" type="primary">
+                        通过
+                      </Button>
+                    </Popconfirm>
+                    <Button size="small" danger onClick={() => rejectSource(r)}>
+                      驳回
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            建议先「配置并测试」（贴网址 AI 识别 + 测试采集确认能出数据）再点通过；驳回需填写理由，申请企业可见。
+          </Typography.Text>
+        </Card>
+      ) : null}
+
       <Card
         className="compass-card"
         title="数据源"
@@ -415,7 +569,7 @@ export default function SourcesPage() {
           <Table<SourceItem>
             rowKey="id"
             columns={columns}
-            dataSource={items}
+            dataSource={listedItems}
             pagination={false}
             size="middle"
             locale={{ emptyText: <Empty description="暂无数据源，点击右上角新增" /> }}

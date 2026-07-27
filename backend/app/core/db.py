@@ -37,6 +37,9 @@ MIGRATIONS = [
     "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active'",
     "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS source_ids JSONB "
     "NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE sources ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active'",
+    "ALTER TABLE sources ADD COLUMN IF NOT EXISTS created_by_tenant_id BIGINT",
+    "ALTER TABLE sources ADD COLUMN IF NOT EXISTS reject_reason TEXT",
 ]
 
 

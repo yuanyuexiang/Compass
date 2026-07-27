@@ -207,6 +207,16 @@ export interface SourceOption {
   enabled: boolean;
 }
 
+export interface SourceRequestItem {
+  id: number;
+  display_name: string;
+  url: string;
+  note: string;
+  status: 'pending' | 'active' | 'rejected';
+  reject_reason: string | null;
+  created_at: string | null;
+}
+
 export interface NotificationItem {
   id: number | string;
   title: string;

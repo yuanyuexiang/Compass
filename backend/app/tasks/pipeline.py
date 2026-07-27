@@ -24,6 +24,7 @@ from app.models import (
     CompanyProfile,
     Project,
     Source,
+    SourceStatus,
     Subscription,
     Tenant,
 )
@@ -135,7 +136,9 @@ def crawl_tick() -> None:
         if not crawl_is_due(get_setting(session, KEY_LAST_AUTO_CRAWL), interval, now):
             return
         set_setting(session, KEY_LAST_AUTO_CRAWL, now.isoformat())
-        source_ids = session.scalars(select(Source.id).where(Source.enabled)).all()
+        source_ids = session.scalars(
+            select(Source.id).where(Source.enabled, Source.status == SourceStatus.ACTIVE.value)
+        ).all()
     logger.info("自动采集触发（间隔 %d 分钟，%d 个源）", interval, len(source_ids))
     for sid in source_ids:
         crawl_source_task.delay(sid)
@@ -145,7 +148,9 @@ def crawl_tick() -> None:
 def crawl_all_sources() -> None:
     """手动全量采集（不影响自动调度的计时）。"""
     with session_scope() as session:
-        source_ids = session.scalars(select(Source.id).where(Source.enabled)).all()
+        source_ids = session.scalars(
+            select(Source.id).where(Source.enabled, Source.status == SourceStatus.ACTIVE.value)
+        ).all()
     for sid in source_ids:
         crawl_source_task.delay(sid)
 
@@ -154,7 +159,7 @@ def crawl_all_sources() -> None:
 def crawl_source_task(source_id: int) -> None:
     with session_scope() as session:
         source = session.get(Source, source_id)
-        if source is None or not source.enabled:
+        if source is None or not source.enabled or source.status != SourceStatus.ACTIVE.value:
             return
         new_ids = run_crawl_source(session, source)
         source.last_run_at = datetime.now(UTC)

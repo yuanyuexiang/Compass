@@ -2,14 +2,16 @@
 
 租户侧仅暴露 /sources/options 只读源名列表，供订阅设置页勾选「关注的数据源」。"""
 
+from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep, PlatformAdminDep
 from app.crawler.base import ADAPTERS
-from app.models import Announcement, Source
+from app.models import Announcement, Source, SourceStatus, Subscription, Tenant
 
 router = APIRouter(prefix="/api")
 
@@ -30,9 +32,12 @@ def _source_out(s: Source, count: int) -> dict:
         "adapter": s.adapter,
         "adapter_display_name": adapters.get(s.adapter, s.adapter),
         "enabled": s.enabled,
+        "status": s.status,
+        "reject_reason": s.reject_reason,
         "min_interval_seconds": s.min_interval_seconds,
         "config": s.config or {},
         "last_run_at": s.last_run_at,
+        "created_at": s.created_at,
         "announcement_count": count,
     }
 
@@ -45,8 +50,13 @@ def list_sources(current: CurrentUser = PlatformAdminDep) -> list[dict]:
                 select(Announcement.source_id, func.count()).group_by(Announcement.source_id)
             ).all()
         )
+        tenant_names = dict(session.execute(select(Tenant.id, Tenant.name)).all())
         rows = session.scalars(select(Source).order_by(Source.id)).all()
-        return [_source_out(s, counts.get(s.id, 0)) for s in rows]
+        return [
+            _source_out(s, counts.get(s.id, 0))
+            | {"requested_by": tenant_names.get(s.created_by_tenant_id)}
+            for s in rows
+        ]
 
 
 @router.get("/sources/adapters")
@@ -56,13 +66,144 @@ def list_adapters(current: CurrentUser = PlatformAdminDep) -> list[dict]:
 
 @router.get("/sources/options")
 def source_options(current: CurrentUser = CurrentUserDep) -> list[dict]:
-    """租户可读的源名列表（订阅设置页「关注的数据源」用），不含采集配置细节。"""
+    """租户可读的源名列表（订阅设置页「关注的数据源」用），只含已审批生效的源。"""
     with session_scope() as session:
-        rows = session.scalars(select(Source).order_by(Source.id)).all()
+        rows = session.scalars(
+            select(Source)
+            .where(Source.status == SourceStatus.ACTIVE.value)
+            .order_by(Source.id)
+        ).all()
         return [
             {"id": s.id, "display_name": s.display_name or s.name, "enabled": s.enabled}
             for s in rows
         ]
+
+
+# —— 租户申请新数据源（审批制：pending 起步，平台管理员批准后才参与采集）——
+
+MAX_PENDING_REQUESTS_PER_TENANT = 5
+
+
+class SourceRequestIn(BaseModel):
+    url: str = Field(min_length=10, max_length=500)
+    display_name: str = Field(min_length=2, max_length=128)
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("url")
+    @classmethod
+    def _http_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("网址须以 http(s):// 开头")
+        return v
+
+
+def _request_out(s: Source) -> dict:
+    return {
+        "id": s.id,
+        "display_name": s.display_name or s.name,
+        "url": (s.config or {}).get("url", ""),
+        "note": (s.config or {}).get("request_note", ""),
+        "status": s.status,
+        "reject_reason": s.reject_reason,
+        "created_at": s.created_at,
+    }
+
+
+@router.post("/sources/requests")
+def create_source_request(body: SourceRequestIn, current: CurrentUser = CurrentUserDep) -> dict:
+    """租户提交新数据源申请：只填网址+名称+说明，采集配置由管理员审批时补齐。"""
+    with session_scope() as session:
+        dup = session.scalar(
+            select(Source).where(
+                Source.config["url"].astext == body.url,
+                Source.status != SourceStatus.REJECTED.value,
+            )
+        )
+        if dup is not None:
+            active = dup.status == SourceStatus.ACTIVE.value
+            already = "已在采集列表中" if active else "已有申请待审批"
+            raise HTTPException(status_code=409, detail=f"该网址{already}")
+        pending = session.scalar(
+            select(func.count()).select_from(Source).where(
+                Source.created_by_tenant_id == current.tenant_id,
+                Source.status == SourceStatus.PENDING.value,
+            )
+        )
+        if pending >= MAX_PENDING_REQUESTS_PER_TENANT:
+            raise HTTPException(
+                status_code=429,
+                detail=f"待审批申请已达 {MAX_PENDING_REQUESTS_PER_TENANT} 条，请等待管理员处理",
+            )
+        source = Source(
+            name=f"req-{uuid4().hex[:10]}",
+            display_name=body.display_name.strip(),
+            adapter="generic",  # 占位；管理员审批时经 AI 识别确定实际适配器与选择器
+            enabled=False,
+            status=SourceStatus.PENDING.value,
+            created_by_tenant_id=current.tenant_id,
+            config={"url": body.url, "request_note": body.note.strip()},
+        )
+        session.add(source)
+        session.flush()
+        return {"ok": True, "request": _request_out(source)}
+
+
+@router.get("/sources/requests/mine")
+def my_source_requests(current: CurrentUser = CurrentUserDep) -> list[dict]:
+    """本租户提交的数据源申请及状态（不含其他租户的申请）。"""
+    with session_scope() as session:
+        rows = session.scalars(
+            select(Source)
+            .where(Source.created_by_tenant_id == current.tenant_id)
+            .order_by(Source.id.desc())
+        ).all()
+        return [_request_out(s) for s in rows]
+
+
+class SourceRejectIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/sources/{source_id}/approve")
+def approve_source(source_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
+    """批准租户申请：源转 active 并启用采集；申请方若设过关注源则自动补上该源。"""
+    with session_scope() as session:
+        source = session.get(Source, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        if source.status == SourceStatus.ACTIVE.value:
+            raise HTTPException(status_code=422, detail="该数据源已是生效状态")
+        source.status = SourceStatus.ACTIVE.value
+        source.enabled = True
+        source.reject_reason = None
+        # 空列表 = 不限源（本就包含新源），只有显式设过关注列表的才需要补
+        if source.created_by_tenant_id is not None:
+            sub = session.scalar(
+                select(Subscription).where(
+                    Subscription.tenant_id == source.created_by_tenant_id
+                )
+            )
+            if sub is not None and sub.source_ids and source.id not in sub.source_ids:
+                sub.source_ids = [*sub.source_ids, source.id]
+        return {"ok": True, "source": _source_out(source, 0)}
+
+
+@router.post("/sources/{source_id}/reject")
+def reject_source(
+    source_id: int, body: SourceRejectIn, current: CurrentUser = PlatformAdminDep
+) -> dict:
+    """驳回租户申请（附理由，申请方可在订阅设置页看到）。"""
+    with session_scope() as session:
+        source = session.get(Source, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        if source.status != SourceStatus.PENDING.value:
+            raise HTTPException(status_code=422, detail="仅待审批的申请可驳回")
+        source.status = SourceStatus.REJECTED.value
+        source.enabled = False
+        source.reject_reason = body.reason.strip()
+        return {"ok": True}
 
 
 # —— 测试采集（不入库的试跑预览，必须声明在 /{source_id} 路由之前）——
@@ -446,6 +587,8 @@ def trigger_crawl(source_id: int, current: CurrentUser = PlatformAdminDep) -> di
         source = session.get(Source, source_id)
         if source is None:
             raise HTTPException(status_code=404, detail="数据源不存在")
+        if source.status != SourceStatus.ACTIVE.value:
+            raise HTTPException(status_code=422, detail="数据源未审批生效，不能采集")
         if not source.enabled:
             raise HTTPException(status_code=422, detail="数据源已停用，请先启用")
     crawl_source_task.delay(source_id)

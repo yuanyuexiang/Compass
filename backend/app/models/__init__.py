@@ -4,6 +4,7 @@ from app.models.public import (
     Attachment,
     Project,
     Source,
+    SourceStatus,
     SystemSetting,
 )
 from app.models.tenant import (
@@ -28,6 +29,7 @@ __all__ = [
     "ProfileChunk",
     "Project",
     "Source",
+    "SourceStatus",
     "Subscription",
     "SystemSetting",
     "Tenant",

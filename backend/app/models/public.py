@@ -33,6 +33,14 @@ class AnnouncementStatus(enum.StrEnum):
     FAILED = "failed"
 
 
+class SourceStatus(enum.StrEnum):
+    """数据源生命周期：租户申请的源 pending 起步，平台管理员审批后 active 才参与采集。"""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    REJECTED = "rejected"
+
+
 class Source(Base):
     __tablename__ = "sources"
 
@@ -41,6 +49,9 @@ class Source(Base):
     display_name: Mapped[str | None] = mapped_column(String(128))  # 中文显示名，界面主标签
     adapter: Mapped[str] = mapped_column(String(64))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(16), default=SourceStatus.ACTIVE.value)
+    created_by_tenant_id: Mapped[int | None] = mapped_column(BigInteger)  # 租户申请的源记提交方
+    reject_reason: Mapped[str | None] = mapped_column(Text)
     cron: Mapped[str | None] = mapped_column(String(64))
     min_interval_seconds: Mapped[float] = mapped_column(Float, default=3.0)
     config: Mapped[dict] = mapped_column(JSONB, default=dict)

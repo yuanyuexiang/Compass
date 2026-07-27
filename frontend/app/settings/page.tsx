@@ -1,18 +1,43 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { Alert, App, Button, Card, Col, Form, Input, Rate, Row, Select, Skeleton, Space, Switch, Typography } from 'antd';
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  List,
+  Modal,
+  Rate,
+  Row,
+  Select,
+  Skeleton,
+  Space,
+  Switch,
+  Tag,
+  Typography,
+} from 'antd';
 import {
   CloudDownloadOutlined,
   DingtalkOutlined,
   MailOutlined,
+  PlusOutlined,
   SaveOutlined,
   SendOutlined,
   WechatWorkOutlined,
 } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
-import type { SourceOption, SubscriptionData } from '@/lib/types';
+import type { SourceOption, SourceRequestItem, SubscriptionData } from '@/lib/types';
+
+const REQUEST_STATUS_TAG: Record<SourceRequestItem['status'], { color: string; label: string }> = {
+  pending: { color: 'gold', label: '待审批' },
+  active: { color: 'green', label: '已通过' },
+  rejected: { color: 'red', label: '已驳回' },
+};
 
 type ChannelKey = 'email' | 'wecom' | 'dingtalk' | 'feishu';
 
@@ -78,6 +103,18 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sourceOptions, setSourceOptions] = useState<SourceOption[]>([]);
+  const [myRequests, setMyRequests] = useState<SourceRequestItem[]>([]);
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requesting, setRequesting] = useState(false);
+  const [requestForm] = Form.useForm<{ url: string; display_name: string; note: string }>();
+
+  const loadRequests = () => {
+    apiFetch<SourceRequestItem[]>('/api/sources/requests/mine')
+      .then(setMyRequests)
+      .catch(() => {
+        // 申请列表拉取失败不阻塞订阅设置
+      });
+  };
 
   useEffect(() => {
     apiFetch<SubscriptionData>('/api/subscriptions')
@@ -92,7 +129,24 @@ export default function SettingsPage() {
       .catch(() => {
         // 源列表拉取失败仅影响下拉选项展示，不阻塞订阅设置
       });
+    loadRequests();
   }, [form]);
+
+  const submitRequest = async () => {
+    const values = await requestForm.validateFields();
+    setRequesting(true);
+    try {
+      await apiFetch('/api/sources/requests', { method: 'POST', body: JSON.stringify(values) });
+      message.success('申请已提交，管理员审批通过后即开始采集');
+      setRequestOpen(false);
+      requestForm.resetFields();
+      loadRequests();
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setRequesting(false);
+    }
+  };
 
   const onFinish = async (values: SubscriptionData) => {
     const payload: SubscriptionData = {
@@ -184,11 +238,16 @@ export default function SettingsPage() {
                   <span>关注的数据源</span>
                 </Space>
               }
+              extra={
+                <Button icon={<PlusOutlined />} onClick={() => setRequestOpen(true)}>
+                  申请新数据源
+                </Button>
+              }
             >
               <Form.Item
                 name="source_ids"
                 label="只看这些采集平台的公告（商机查询与智能推荐同时生效）"
-                extra="不选 = 全部数据源。数据源由平台统一采集维护，如需新增平台请联系管理员。"
+                extra="不选 = 全部数据源。缺你要的平台？点右上角「申请新数据源」，管理员审批通过后即可勾选。"
                 style={{ marginBottom: 0 }}
               >
                 <Select
@@ -201,6 +260,32 @@ export default function SettingsPage() {
                   }))}
                 />
               </Form.Item>
+              {myRequests.length > 0 ? (
+                <List
+                  size="small"
+                  style={{ marginTop: 16 }}
+                  header={<Typography.Text strong>我提交的申请</Typography.Text>}
+                  dataSource={myRequests}
+                  renderItem={(r) => (
+                    <List.Item>
+                      <Space size={8} wrap>
+                        <Tag color={REQUEST_STATUS_TAG[r.status].color}>
+                          {REQUEST_STATUS_TAG[r.status].label}
+                        </Tag>
+                        <Typography.Text strong>{r.display_name}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {r.url}
+                        </Typography.Text>
+                        {r.status === 'rejected' && r.reject_reason ? (
+                          <Typography.Text type="danger" style={{ fontSize: 12 }}>
+                            理由：{r.reject_reason}
+                          </Typography.Text>
+                        ) : null}
+                      </Space>
+                    </List.Item>
+                  )}
+                />
+              ) : null}
             </Card>
 
             <Card className="compass-card" title="通知渠道">
@@ -241,6 +326,47 @@ export default function SettingsPage() {
           </Space>
         </Form>
       </div>
+
+      <Modal
+        title="申请新数据源"
+        open={requestOpen}
+        onOk={submitRequest}
+        onCancel={() => setRequestOpen(false)}
+        confirmLoading={requesting}
+        okText="提交申请"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
+          填写你希望平台采集的公告网站，管理员审批通过后即开始采集，届时可在「关注的数据源」中勾选。
+        </Typography.Paragraph>
+        <Form form={requestForm} layout="vertical">
+          <Form.Item
+            name="url"
+            label="公告列表页网址"
+            rules={[
+              { required: true, message: '请填写网址' },
+              { pattern: /^https?:\/\//, message: '网址须以 http(s):// 开头' },
+            ]}
+          >
+            <Input placeholder="https://例：某省公共资源交易平台的招标公告列表页" />
+          </Form.Item>
+          <Form.Item
+            name="display_name"
+            label="平台名称"
+            rules={[{ required: true, min: 2, message: '请填写平台名称（至少 2 个字）' }]}
+          >
+            <Input placeholder="例：广东省政府采购网" maxLength={128} />
+          </Form.Item>
+          <Form.Item name="note" label="申请说明（选填）">
+            <Input.TextArea
+              rows={3}
+              maxLength={500}
+              placeholder="例：我们主要投这个平台的标，希望第一时间收到推荐"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </AppLayout>
   );
 }
