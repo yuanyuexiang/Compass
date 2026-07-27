@@ -31,10 +31,11 @@ const MENU_ITEMS = [
 
 const ADMIN_MENU_ITEMS = [
   { key: '/members', icon: <TeamOutlined />, label: <Link href="/members">成员管理</Link> },
-  { key: '/sources', icon: <CloudDownloadOutlined />, label: <Link href="/sources">采集管理</Link> },
 ];
 
+// 采集源全局共享，增改/启停会影响所有租户 → 采集管理仅平台管理员可见
 const PLATFORM_MENU_ITEMS = [
+  { key: '/sources', icon: <CloudDownloadOutlined />, label: <Link href="/sources">采集管理</Link> },
   { key: '/tenants', icon: <ApartmentOutlined />, label: <Link href="/tenants">租户管理</Link> },
 ];
 

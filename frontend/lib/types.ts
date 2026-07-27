@@ -197,6 +197,14 @@ export interface SubscriptionData {
     dingtalk: WebhookChannel;
     feishu: WebhookChannel;
   };
+  /** 关注的数据源 id 列表；空 = 全部数据源 */
+  source_ids?: number[];
+}
+
+export interface SourceOption {
+  id: number;
+  display_name: string;
+  enabled: boolean;
 }
 
 export interface NotificationItem {

@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { Alert, App, Button, Card, Col, Form, Input, Rate, Row, Skeleton, Space, Switch, Typography } from 'antd';
+import { Alert, App, Button, Card, Col, Form, Input, Rate, Row, Select, Skeleton, Space, Switch, Typography } from 'antd';
 import {
+  CloudDownloadOutlined,
   DingtalkOutlined,
   MailOutlined,
   SaveOutlined,
@@ -11,7 +12,7 @@ import {
 } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
-import type { SubscriptionData } from '@/lib/types';
+import type { SourceOption, SubscriptionData } from '@/lib/types';
 
 type ChannelKey = 'email' | 'wecom' | 'dingtalk' | 'feishu';
 
@@ -67,6 +68,7 @@ const DEFAULT_VALUES: SubscriptionData = {
     dingtalk: { enabled: false, webhook: '' },
     feishu: { enabled: false, webhook: '' },
   },
+  source_ids: [],
 };
 
 export default function SettingsPage() {
@@ -75,6 +77,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceOptions, setSourceOptions] = useState<SourceOption[]>([]);
 
   useEffect(() => {
     apiFetch<SubscriptionData>('/api/subscriptions')
@@ -84,6 +87,11 @@ export default function SettingsPage() {
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
+    apiFetch<SourceOption[]>('/api/sources/options')
+      .then(setSourceOptions)
+      .catch(() => {
+        // 源列表拉取失败仅影响下拉选项展示，不阻塞订阅设置
+      });
   }, [form]);
 
   const onFinish = async (values: SubscriptionData) => {
@@ -91,6 +99,7 @@ export default function SettingsPage() {
       min_star: values.min_star ?? DEFAULT_VALUES.min_star,
       immediate: values.immediate ?? false,
       daily_digest: values.daily_digest ?? false,
+      source_ids: values.source_ids ?? [],
       channels: {
         email: {
           enabled: values.channels?.email?.enabled ?? false,
@@ -165,6 +174,33 @@ export default function SettingsPage() {
                   </Form.Item>
                 </Col>
               </Row>
+            </Card>
+
+            <Card
+              className="compass-card"
+              title={
+                <Space size={8}>
+                  <CloudDownloadOutlined style={{ color: '#2F54EB' }} />
+                  <span>关注的数据源</span>
+                </Space>
+              }
+            >
+              <Form.Item
+                name="source_ids"
+                label="只看这些采集平台的公告（商机查询与智能推荐同时生效）"
+                extra="不选 = 全部数据源。数据源由平台统一采集维护，如需新增平台请联系管理员。"
+                style={{ marginBottom: 0 }}
+              >
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="全部数据源"
+                  options={sourceOptions.map((s) => ({
+                    value: s.id,
+                    label: s.enabled ? s.display_name : `${s.display_name}（已停采）`,
+                  }))}
+                />
+              </Form.Item>
             </Card>
 
             <Card className="compass-card" title="通知渠道">

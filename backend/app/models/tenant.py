@@ -103,6 +103,8 @@ class Subscription(Base):
     immediate: Mapped[bool] = mapped_column(Boolean, default=True)
     daily_digest: Mapped[bool] = mapped_column(Boolean, default=True)
     channels: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # 关注的数据源 id 列表；空 = 不限（全部源）。采集全局共享，此处只影响该租户查询/推荐口径
+    source_ids: Mapped[list] = mapped_column(JSONB, default=list)
 
 
 class LlmUsage(Base):

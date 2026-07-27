@@ -27,6 +27,24 @@ def get_filter_regions(session: Session, tenant_id: int) -> list[str]:
     return ((profile.data or {}).get("filter") or {}).get("regions") or []
 
 
+def get_watched_source_ids(session: Session, tenant_id: int) -> list[int]:
+    """读取租户「关注的数据源」（Subscription.source_ids）；未设置返回 []（= 不限）。
+
+    与地区口径同理：采集全局共享，查询/推荐/通知按租户订阅的源过滤，保证各链路口径一致。
+    """
+    from app.models import Subscription
+
+    sub = session.scalar(select(Subscription).where(Subscription.tenant_id == tenant_id))
+    if sub is None:
+        return []
+    return [int(i) for i in (sub.source_ids or [])]
+
+
+def tenant_watches_source(source_ids: list[int], source_id: int) -> bool:
+    """空列表 = 不限源；否则要求命中。匹配 fan-out 与查询共用此判定。"""
+    return not source_ids or source_id in source_ids
+
+
 def region_filter_clause(regions: list[str]) -> ColumnElement[bool] | None:
     """画像地区列表 → 公告查询的地区过滤条件（引用 Project，故调用方需 outer join Project）。
 

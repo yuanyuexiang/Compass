@@ -20,7 +20,12 @@ from app.core.kv import (
 from app.core.ratelimit import try_consume_quota
 from app.core.security import CurrentUser, CurrentUserDep
 from app.matching.engine import parse_budget_yuan
-from app.matching.profiles import get_filter_regions, region_filter_clause, upsert_profile
+from app.matching.profiles import (
+    get_filter_regions,
+    get_watched_source_ids,
+    region_filter_clause,
+    upsert_profile,
+)
 from app.models import (
     Announcement,
     CompanyProfile,
@@ -161,13 +166,14 @@ def get_subscriptions(current: CurrentUser = CurrentUserDep) -> dict:
         if sub is None:
             return {
                 "min_star": 4, "immediate": True, "daily_digest": True,
-                "channels": DEFAULT_CHANNELS,
+                "channels": DEFAULT_CHANNELS, "source_ids": [],
             }
         return {
             "min_star": sub.min_star,
             "immediate": sub.immediate,
             "daily_digest": sub.daily_digest,
             "channels": DEFAULT_CHANNELS | (sub.channels or {}),
+            "source_ids": sub.source_ids or [],
         }
 
 
@@ -184,6 +190,8 @@ def put_subscriptions(body: dict, current: CurrentUser = CurrentUserDep) -> dict
         sub.immediate = bool(body.get("immediate", True))
         sub.daily_digest = bool(body.get("daily_digest", True))
         sub.channels = body.get("channels") or {}
+        # 关注的数据源：只收合法 int id；空列表 = 不限
+        sub.source_ids = [int(i) for i in (body.get("source_ids") or []) if str(i).isdigit()]
         return {"ok": True}
 
 
@@ -248,6 +256,9 @@ def nl_search(body: NlSearchIn, current: CurrentUser = CurrentUserDep) -> dict:
             active_regions = []
         if (clause := region_filter_clause(active_regions)) is not None:
             stmt = stmt.where(clause)
+        # 租户「关注的数据源」：与普通查询/推荐口径一致
+        if watched := get_watched_source_ids(session, current.tenant_id):
+            stmt = stmt.where(Announcement.source_id.in_(watched))
         rows = session.execute(stmt).all()
 
         items = []

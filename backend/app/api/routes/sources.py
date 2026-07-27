@@ -1,11 +1,13 @@
-"""采集源管理：查看（登录即可）+ 增改/启停/手动触发（仅管理员）。"""
+"""采集源管理：平台管理员专属（采集全局共享，租户间不可互相增改/启停）。
+
+租户侧仅暴露 /sources/options 只读源名列表，供订阅设置页勾选「关注的数据源」。"""
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.core.db import session_scope
-from app.core.security import AdminDep, CurrentUser, CurrentUserDep
+from app.core.security import CurrentUser, CurrentUserDep, PlatformAdminDep
 from app.crawler.base import ADAPTERS
 from app.models import Announcement, Source
 
@@ -36,7 +38,7 @@ def _source_out(s: Source, count: int) -> dict:
 
 
 @router.get("/sources")
-def list_sources(current: CurrentUser = CurrentUserDep) -> list[dict]:
+def list_sources(current: CurrentUser = PlatformAdminDep) -> list[dict]:
     with session_scope() as session:
         counts = dict(
             session.execute(
@@ -48,8 +50,19 @@ def list_sources(current: CurrentUser = CurrentUserDep) -> list[dict]:
 
 
 @router.get("/sources/adapters")
-def list_adapters(current: CurrentUser = CurrentUserDep) -> list[dict]:
+def list_adapters(current: CurrentUser = PlatformAdminDep) -> list[dict]:
     return [{"name": k, "display_name": v} for k, v in _adapters().items()]
+
+
+@router.get("/sources/options")
+def source_options(current: CurrentUser = CurrentUserDep) -> list[dict]:
+    """租户可读的源名列表（订阅设置页「关注的数据源」用），不含采集配置细节。"""
+    with session_scope() as session:
+        rows = session.scalars(select(Source).order_by(Source.id)).all()
+        return [
+            {"id": s.id, "display_name": s.display_name or s.name, "enabled": s.enabled}
+            for s in rows
+        ]
 
 
 # —— 测试采集（不入库的试跑预览，必须声明在 /{source_id} 路由之前）——
@@ -61,7 +74,7 @@ class SourceTestIn(BaseModel):
 
 
 @router.post("/sources/test")
-def test_source(body: SourceTestIn, current: CurrentUser = AdminDep) -> dict:
+def test_source(body: SourceTestIn, current: CurrentUser = PlatformAdminDep) -> dict:
     """用给定配置试采列表前 5 条 + 首条详情正文，供保存前验证选择器。"""
     from app.crawler.base import get_adapter
     from app.parsing.clean import html_to_text
@@ -122,7 +135,7 @@ class SmartSuggestIn(BaseModel):
 
 
 @router.post("/sources/smart-suggest")
-def smart_suggest(body: SmartSuggestIn, current: CurrentUser = AdminDep) -> dict:
+def smart_suggest(body: SmartSuggestIn, current: CurrentUser = PlatformAdminDep) -> dict:
     """智能识别：贴网址 → 自动判定专用/静态/动态 → 生成配置 → 试采预览（tech-design §4.1）。
 
     ① 域名命中已知专用适配器 → 用专用采集；② 未知站点用 httpx 判静/动，动态走 Playwright 渲染；
@@ -247,7 +260,7 @@ class SuggestIn(BaseModel):
 
 
 @router.post("/sources/suggest")
-def suggest_source(body: SuggestIn, current: CurrentUser = AdminDep) -> dict:
+def suggest_source(body: SuggestIn, current: CurrentUser = PlatformAdminDep) -> dict:
     """用户只提供列表页网址：抓取 → LLM 识别选择器 → 试采验证 → 返回配置与预览。"""
     from app.ai.suggest import suggest_content_selector, suggest_list_selectors
     from app.crawler.adapters.generic import GenericAdapter
@@ -314,7 +327,7 @@ class ScheduleIn(BaseModel):
 
 
 @router.get("/sources/schedule")
-def get_schedule(current: CurrentUser = CurrentUserDep) -> dict:
+def get_schedule(current: CurrentUser = PlatformAdminDep) -> dict:
     from app.core.kv import (
         DEFAULT_CRAWL_INTERVAL_MINUTES,
         KEY_CRAWL_INTERVAL,
@@ -332,7 +345,7 @@ def get_schedule(current: CurrentUser = CurrentUserDep) -> dict:
 
 
 @router.put("/sources/schedule")
-def put_schedule(body: ScheduleIn, current: CurrentUser = AdminDep) -> dict:
+def put_schedule(body: ScheduleIn, current: CurrentUser = PlatformAdminDep) -> dict:
     from app.core.kv import KEY_CRAWL_INTERVAL, set_setting
 
     with session_scope() as session:
@@ -357,7 +370,7 @@ class SourceUpdate(BaseModel):
 
 
 @router.post("/sources")
-def create_source(body: SourceIn, current: CurrentUser = AdminDep) -> dict:
+def create_source(body: SourceIn, current: CurrentUser = PlatformAdminDep) -> dict:
     if body.adapter not in _adapters():
         raise HTTPException(status_code=422, detail=f"未注册的适配器: {body.adapter}")
     with session_scope() as session:
@@ -386,7 +399,9 @@ def create_source(body: SourceIn, current: CurrentUser = AdminDep) -> dict:
 
 
 @router.put("/sources/{source_id}")
-def update_source(source_id: int, body: SourceUpdate, current: CurrentUser = AdminDep) -> dict:
+def update_source(
+    source_id: int, body: SourceUpdate, current: CurrentUser = PlatformAdminDep
+) -> dict:
     with session_scope() as session:
         source = session.get(Source, source_id)
         if source is None:
@@ -403,7 +418,7 @@ def update_source(source_id: int, body: SourceUpdate, current: CurrentUser = Adm
 
 
 @router.delete("/sources/{source_id}")
-def delete_source(source_id: int, current: CurrentUser = AdminDep) -> dict:
+def delete_source(source_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
     """仅允许删除没有公告数据的源；有数据的源出于完整性只能停用。"""
     with session_scope() as session:
         source = session.get(Source, source_id)
@@ -424,7 +439,7 @@ def delete_source(source_id: int, current: CurrentUser = AdminDep) -> dict:
 
 
 @router.post("/sources/{source_id}/crawl")
-def trigger_crawl(source_id: int, current: CurrentUser = AdminDep) -> dict:
+def trigger_crawl(source_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
     from app.tasks.pipeline import crawl_source_task
 
     with session_scope() as session:
@@ -438,7 +453,7 @@ def trigger_crawl(source_id: int, current: CurrentUser = AdminDep) -> dict:
 
 
 @router.post("/sources/crawl-all")
-def trigger_crawl_all(current: CurrentUser = AdminDep) -> dict:
+def trigger_crawl_all(current: CurrentUser = PlatformAdminDep) -> dict:
     from app.tasks.pipeline import crawl_all_sources
 
     crawl_all_sources.delay()

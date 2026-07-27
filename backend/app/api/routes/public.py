@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep
-from app.matching.profiles import get_filter_regions, region_filter_clause
+from app.matching.profiles import get_filter_regions, get_watched_source_ids, region_filter_clause
 from app.models import Announcement, MatchResult, Notification, Project
 
 router = APIRouter(prefix="/api")
@@ -50,6 +50,9 @@ def list_announcements(
             active_regions = []
         if (clause := region_filter_clause(active_regions)) is not None:
             stmt = stmt.where(clause)
+        # 租户「关注的数据源」（订阅设置）：空 = 不限；与推荐 fan-out 口径一致
+        if source_ids := get_watched_source_ids(session, current.tenant_id):
+            stmt = stmt.where(Announcement.source_id.in_(source_ids))
         if status:
             stmt = stmt.where(Announcement.status == status)
         total = session.scalar(select(func.count()).select_from(stmt.subquery()))

@@ -16,6 +16,7 @@ from app.core import storage
 from app.core.db import session_scope
 from app.crawler.base import SourceAdapter, get_adapter, url_fingerprint
 from app.matching.engine import run_match
+from app.matching.profiles import tenant_watches_source
 from app.models import (
     Announcement,
     AnnouncementStatus,
@@ -23,6 +24,7 @@ from app.models import (
     CompanyProfile,
     Project,
     Source,
+    Subscription,
     Tenant,
 )
 from app.notify.dispatcher import dispatch_daily_digest, dispatch_match
@@ -220,12 +222,21 @@ def publish_task(announcement_id: int) -> None:
         project = session.scalar(
             select(Project.id).where(Project.announcement_id == announcement_id)
         )
+        source_id = session.scalar(
+            select(Announcement.source_id).where(Announcement.id == announcement_id)
+        )
         tenant_ids = session.scalars(
             select(Tenant.id)
             .join(CompanyProfile, CompanyProfile.tenant_id == Tenant.id)
             .where(Tenant.enabled)
         ).all()
+        # 租户「关注的数据源」（订阅设置）：不关注该源的租户不派发匹配，省 LLM 也省噪音
+        watched_map = dict(
+            session.execute(select(Subscription.tenant_id, Subscription.source_ids)).all()
+        )
     for tenant_id in tenant_ids:
+        if not tenant_watches_source(watched_map.get(tenant_id) or [], source_id):
+            continue
         match_project_task.delay(project, tenant_id)
 
 
