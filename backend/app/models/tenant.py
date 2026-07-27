@@ -27,7 +27,10 @@ class Tenant(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
+    # enabled 是流水线/查询的运行开关；status 记录审批生命周期，两者由审批操作联动
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # pending（申请待审批）/ active（已开通）/ disabled（已停用）
+    status: Mapped[str] = mapped_column(String(16), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     users: Mapped[list["User"]] = relationship(back_populates="tenant")
@@ -43,6 +46,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(128))
     # platform_admin / tenant_admin / sales
     role: Mapped[str] = mapped_column(String(32), default="sales")
+    email: Mapped[str | None] = mapped_column(String(128))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
@@ -98,6 +103,27 @@ class Subscription(Base):
     immediate: Mapped[bool] = mapped_column(Boolean, default=True)
     daily_digest: Mapped[bool] = mapped_column(Boolean, default=True)
     channels: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class LlmUsage(Base):
+    """LLM 调用记账：配额判断的依据，也是将来商业化计费的底账。
+
+    tenant_id 为空表示公共层调用（如字段提取，全租户共享成本）。
+    """
+
+    __tablename__ = "llm_usage"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    # extract / match / nl_search / profile_suggest / source_suggest
+    scene: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
 
 
 class Notification(Base):

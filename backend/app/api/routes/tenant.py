@@ -10,6 +10,14 @@ from app.ai import websearch
 from app.ai.nl_search import parse_query
 from app.ai.profile_suggest import suggest_profile
 from app.core.db import session_scope
+from app.core.kv import (
+    DEFAULT_QUOTA_NL_SEARCH,
+    DEFAULT_QUOTA_PROFILE_SUGGEST,
+    KEY_QUOTA_NL_SEARCH,
+    KEY_QUOTA_PROFILE_SUGGEST,
+    get_setting,
+)
+from app.core.ratelimit import try_consume_quota
 from app.core.security import CurrentUser, CurrentUserDep
 from app.matching.engine import parse_budget_yuan
 from app.matching.profiles import get_filter_regions, region_filter_clause, upsert_profile
@@ -123,8 +131,14 @@ def profile_suggest(body: ProfileSuggestIn, current: CurrentUser = CurrentUserDe
         raise HTTPException(
             status_code=400, detail="未配置联网搜索（METASO_API_KEY），无法自动生成，请手动填写画像"
         )
+    with session_scope() as session:
+        quota = int(get_setting(session, KEY_QUOTA_PROFILE_SUGGEST, DEFAULT_QUOTA_PROFILE_SUGGEST))
+    if not try_consume_quota(current.tenant_id, "profile_suggest", quota):
+        raise HTTPException(
+            status_code=429, detail="今日 AI 画像生成次数已用完，请明天再试或手动填写"
+        )
     try:
-        return suggest_profile(name)
+        return suggest_profile(name, tenant_id=current.tenant_id)
     except Exception as exc:
         logger.exception("AI 画像生成失败")
         raise HTTPException(status_code=502, detail=f"生成画像失败：{exc}") from exc
@@ -211,7 +225,11 @@ class NlSearchIn(BaseModel):
 @router.post("/search/nl")
 def nl_search(body: NlSearchIn, current: CurrentUser = CurrentUserDep) -> dict:
     """LLM 解析 DSL → SQL 过滤（关键词/地区）→ Python 侧预算过滤（tech-design.md §5.3）。"""
-    filters = parse_query(body.query)
+    with session_scope() as session:
+        quota = int(get_setting(session, KEY_QUOTA_NL_SEARCH, DEFAULT_QUOTA_NL_SEARCH))
+    # 超出当日配额：跳过 LLM 解析，整句降级为关键词搜索（与解析失败同一兜底路径）
+    degraded = not try_consume_quota(current.tenant_id, "nl_search", quota)
+    filters = {"keyword": body.query} if degraded else parse_query(body.query, current.tenant_id)
     with session_scope() as session:
         stmt = (
             select(Announcement, Project)
@@ -257,4 +275,5 @@ def nl_search(body: NlSearchIn, current: CurrentUser = CurrentUserDep) -> dict:
             "items": items[:50],
             "total": len(items),
             "region_scope": active_regions,
+            "degraded": "quota" if degraded else None,
         }

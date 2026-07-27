@@ -12,7 +12,7 @@ from app.ai.prompts.nl_search_v1 import NL_SEARCH_PROMPT_V1 as PARSE_PROMPT
 logger = logging.getLogger(__name__)
 
 
-def parse_query(query: str) -> dict:
+def parse_query(query: str, tenant_id: int | None = None) -> dict:
     try:
         resp = extract_completion(
             messages=[
@@ -20,6 +20,8 @@ def parse_query(query: str) -> dict:
                 {"role": "user", "content": query},
             ],
             temperature=0.0,
+            scene="nl_search",
+            tenant_id=tenant_id,
         )
         content = resp.choices[0].message.content
         filters = json.loads(content)

@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, public, sources, tenant
+from app.api.routes import admin, auth, public, sources, tenant, users
 
-app = FastAPI(title="Compass API", version="0.2.0")
+app = FastAPI(title="Compass API", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,6 +17,8 @@ app.include_router(auth.router)
 app.include_router(public.router)
 app.include_router(sources.router)
 app.include_router(tenant.router)
+app.include_router(users.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

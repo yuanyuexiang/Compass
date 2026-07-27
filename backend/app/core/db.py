@@ -32,6 +32,9 @@ def session_scope() -> Iterator[Session]:
 # 只允许 ADD COLUMN IF NOT EXISTS 这类可重复执行的语句。
 MIGRATIONS = [
     "ALTER TABLE sources ADD COLUMN IF NOT EXISTS display_name VARCHAR(128)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(128)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active'",
 ]
 
 

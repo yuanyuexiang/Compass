@@ -49,7 +49,7 @@ services:
 
   api:
     <<: *backend
-    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 4
     ports:
       - "127.0.0.1:8300:8000"  # 仅本机回环（SSH 隧道调试用）；公网流量一律走 Traefik → frontend 反代
 

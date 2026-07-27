@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-**V1 全链路已跑通**：采集（ccgp + 江苏公共资源两源）→ 清洗/附件 → DeepSeek 十二字段提取 → 发布 → 三级漏斗匹配（规则→[向量]→LLM 评分卡+六项风险）→ 订阅通知（站内信实测）→ Next.js 管理后台（7 页面）。产品需求见 [prd.md](prd.md)，技术方案见 [tech-design.md](tech-design.md)（架构/选型问题先查它；附录 D–G 是实测记录与遗留项清单，**开工前必读附录 G**）。
+**V1 全链路已跑通**：采集（ccgp + 江苏公共资源两源）→ 清洗/附件 → DeepSeek 十二字段提取 → 发布 → 三级漏斗匹配（规则→[向量]→LLM 评分卡+六项风险）→ 订阅通知（站内信实测）→ Next.js 管理后台（9 页面）。已具备**审批制多租户账号体系**（注册申请→平台管理员审批→成员管理，登录限流+停用校验）与 **LLM 用量记账/每日配额**（超额降级）。产品需求见 [prd.md](prd.md)，技术方案见 [tech-design.md](tech-design.md)（架构/选型问题先查它；附录 D–G 是实测记录与遗留项清单，**开工前必读附录 G**）。
 
 密钥在 `backend/.env`（已 gitignore）：DEEPSEEK_API_KEY 已配；SILICONFLOW_API_KEY 未配 → 向量化自动跳过、匹配退化为二级漏斗，配上即恢复三级。METASO_API_KEY（秘塔 AI 搜索）供「AI 生成画像」联网检索，未配则该功能优雅降级（按钮报错、不影响其他）。
 
@@ -21,7 +21,7 @@ uv run pytest tests/test_matching.py::test_rule_filter_region   # 单个测试
 uv run ruff check app tests scripts            # Lint（提交前必须通过）
 uv run uvicorn app.api.main:app --port 8300    # API（本机 8000 被占用）
 uv run celery -A app.tasks.celery_app worker -l info   # Worker（beat 同理）
-uv run python scripts/dev_seed.py              # 种子租户+admin账号（admin/admin123）
+uv run python scripts/dev_seed.py              # 种子租户+admin账号（admin/admin123，platform_admin）
 uv run python scripts/dev_crawl.py --adapter ccgp --limit 3   # 采集演练（ccgp/jsggzy）
 uv run python scripts/dev_extract.py --limit 3 # AI 提取演练
 uv run python scripts/dev_match.py             # 发布+匹配+通知演练
@@ -43,6 +43,8 @@ uv run python scripts/dev_match.py             # 发布+匹配+通知演练
 ## 架构要点（改代码前必读）
 
 - **公共层/租户层分离**：`models/public.py`（公告只处理一次，全租户共享）vs `models/tenant.py`（画像/匹配/订阅/通知，均含 tenant_id）。租户隔离由 `core/security.py` 的 JWT 依赖注入强制——租户层查询必须过滤 `current.tenant_id`。
+- **账号体系（审批制）**：`POST /api/auth/register` 创建待审批租户（`Tenant.status=pending, enabled=False`）+ tenant_admin；平台管理员（角色 `platform_admin`，种子 admin 即是）在「租户管理」页（`/api/admin`，`PlatformAdminDep`）审批/启停；tenant_admin 在「成员管理」页（`/api/tenant/users`）管本租户账号。登录失败 5 次锁 10 分钟（`core/ratelimit.py`，Redis，不可用则放行）；停用即时生效靠 `get_current_user` 里 60 秒 TTL 缓存的查库校验（`account_block_reason`）。密码强度统一走 `validate_password`。schema 变更用 `core/db.py` 的幂等 MIGRATIONS 列表（ADD COLUMN IF NOT EXISTS），Alembic 仍是待办。
+- **LLM 成本护栏**：所有 LLM 调用经 `ai/llm_config.extract_completion(scene=, tenant_id=)` 记账到 `llm_usage` 表（平台管理员用量报表 `/api/admin/usage`，商业化计费底账）。每租户每日配额存 `system_settings`（键见 `core/kv.py`，0/负数=不限），超额**降级不报错**：匹配精排跳过（公告仍可检索）、NL 搜索退化关键词（响应带 `degraded:"quota"`）、AI 画像返回 429。计数在 Redis（`quota:{scene}:{tenant}:{北京日}`）。
 - **流水线状态机**：`crawled → cleaned → attachments_parsed → ai_extracted → embedded → published`（+failed），发布后 fan-out 到各租户匹配。业务逻辑写成纯函数 `run_*(session,...)`，Celery 任务只是薄包装（`tasks/pipeline.py`）。
 - **可投标闸门**：`app/opportunity.py` 的 `is_biddable(ann_type, title)` 判定公告阶段——中标/成交/废标类不是"寻标"商机，`publish_task` fan-out 前 + `run_match` 内双重拦截，不匹配不推荐不通知（仍入库、商机查询可检索，留给 V3 分析）。规则关键词判定，中标优先于招标。自动采集用 **tick 模式**：Beat 每分钟跑 `crawl_tick`，按 `system_settings` 里管理员配置的间隔（默认 30 分钟，5–720 可调，改动即时生效、无需重启）决定是否派发；数据源经 `/api/sources`（`api/routes/sources.py`）管理，管理员可在后台"采集管理"页增改/启停/手动触发/调整间隔（写操作用 `AdminDep` 权限依赖）。系统级配置读写用 `app/core/kv.py`。
 - **新增采集平台**：分三档。①结构规整的静态站用 `generic`（`adapters/generic.py`），后台选「通用网站」，**贴网址点 AI 识别**或手填选择器表单，"测试采集"预览后保存，零代码。②JS 动态渲染站用 `generic_browser`（`adapters/generic_browser.py`，继承 generic，取页面改走 Playwright 渲染，见 `crawler/browser.py`），后台选「通用网站（动态渲染/JS）」，配选择器 + 可选 wait_selector。③带强反爬/验证码的硬骨头才写专用 SourceAdapter 子类（`@register` + `adapters/__init__.py` import，解析逻辑放可离线测试的静态方法 + 真实页面 fixture）。适配器内置限速**不得绕过**；只采官方公开源（合规红线见 tech-design §10.4）。相关接口：`POST /api/sources/smart-suggest`（**智能识别**：贴网址一步到位——域名命中 `DOMAIN_ADAPTERS` 走专用适配器，否则用 httpx 判静/动 [`ai/suggest.py` 的 `looks_dynamic`：可见文本极少或含瑞数式混淆脚本即判动态]，动态走 Playwright 渲染，再 LLM 生成选择器并试采，静态 0 条自动转动态重试；前端「AI 识别」按钮走此端点）、`POST /api/sources/suggest`（旧端点，仅按给定 HTML 出选择器建议，`ai/suggest.py`）、`POST /api/sources/test`（试采不入库）、`scripts/dev_inspect.py <url>`（探路：列出动态站的 XHR/JSON 接口，摸清后常可降级回 httpx）。前端 config 一律走结构化中文表单，不暴露 JSON。

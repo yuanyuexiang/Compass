@@ -83,6 +83,7 @@ def _llm_json(system_prompt: str, user_content: str) -> dict:
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.0,
+                scene="source_suggest",
             )
             content = resp.choices[0].message.content
             if not content or not content.strip():

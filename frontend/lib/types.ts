@@ -4,8 +4,41 @@ export interface User {
   id: number | string;
   username: string;
   role: string;
+  email?: string | null;
   tenant_id: number | string;
   tenant_name: string;
+}
+
+export interface TenantAdminItem {
+  id: number;
+  name: string;
+  status: 'pending' | 'active' | 'disabled' | string;
+  status_label: string;
+  enabled: boolean;
+  user_count: number;
+  has_profile: boolean;
+  admin_username: string | null;
+  admin_email: string | null;
+  created_at: string | null;
+  is_self: boolean;
+}
+
+export interface MemberItem {
+  id: number;
+  username: string;
+  role: string;
+  role_label: string;
+  email: string | null;
+  enabled: boolean;
+  created_at: string | null;
+}
+
+export interface UsageItem {
+  tenant_id: number | null;
+  tenant_name: string;
+  scene: string;
+  calls: number;
+  total_tokens: number;
 }
 
 export interface LoginResponse {
@@ -86,6 +119,8 @@ export interface NlSearchResult {
   items: AnnouncementItem[];
   total: number;
   region_scope?: string[];
+  // 'quota' = 当日 AI 搜索次数用完，已降级为关键词搜索
+  degraded?: string | null;
 }
 
 export interface FieldValue {

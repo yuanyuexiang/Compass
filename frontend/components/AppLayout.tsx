@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Avatar, Badge, Breadcrumb, Button, Layout, Menu, Space, Typography } from 'antd';
 import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
 import {
+  ApartmentOutlined,
   BellOutlined,
   CloudDownloadOutlined,
   CompassOutlined,
@@ -15,6 +16,7 @@ import {
   LogoutOutlined,
   MessageOutlined,
   SearchOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { apiFetch, clearSession, getCachedUser, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
@@ -28,19 +30,27 @@ const MENU_ITEMS = [
 ];
 
 const ADMIN_MENU_ITEMS = [
+  { key: '/members', icon: <TeamOutlined />, label: <Link href="/members">成员管理</Link> },
   { key: '/sources', icon: <CloudDownloadOutlined />, label: <Link href="/sources">采集管理</Link> },
+];
+
+const PLATFORM_MENU_ITEMS = [
+  { key: '/tenants', icon: <ApartmentOutlined />, label: <Link href="/tenants">租户管理</Link> },
 ];
 
 const ADMIN_ROLES = ['tenant_admin', 'platform_admin'];
 
 function menuItemsFor(role: string | undefined) {
-  return ADMIN_ROLES.includes(role ?? '') ? [...MENU_ITEMS, ...ADMIN_MENU_ITEMS] : MENU_ITEMS;
+  const items = [...MENU_ITEMS];
+  if (ADMIN_ROLES.includes(role ?? '')) items.push(...ADMIN_MENU_ITEMS);
+  if (role === 'platform_admin') items.push(...PLATFORM_MENU_ITEMS);
+  return items;
 }
 
 function selectedMenuKey(pathname: string): string {
   if (pathname === '/') return '/';
   if (pathname.startsWith('/projects')) return '/opportunities';
-  const hit = [...MENU_ITEMS, ...ADMIN_MENU_ITEMS]
+  const hit = [...MENU_ITEMS, ...ADMIN_MENU_ITEMS, ...PLATFORM_MENU_ITEMS]
     .map((i) => i.key)
     .filter((k) => k !== '/')
     .find((k) => pathname.startsWith(k));
@@ -52,7 +62,9 @@ const PAGE_LABELS: Record<string, string> = {
   '/profile': '企业画像',
   '/settings': '订阅设置',
   '/notifications': '通知中心',
+  '/members': '成员管理',
   '/sources': '采集管理',
+  '/tenants': '租户管理',
 };
 
 /** 顶栏面包屑：首页可点击回工作台；项目详情显示三级路径。 */

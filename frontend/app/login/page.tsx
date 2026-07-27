@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { App, Button, Card, Divider, Form, Input, Typography } from 'antd';
 import { CompassOutlined, LockOutlined, UserOutlined } from '@ant-design/icons';
@@ -71,6 +72,11 @@ export default function LoginPage() {
             </Button>
           </Form.Item>
         </Form>
+        <div style={{ textAlign: 'center', marginTop: 4 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            还没有账号？<Link href="/register">申请企业开通</Link>
+          </Typography.Text>
+        </div>
         {/* 演示账号提示仅开发模式显示（生产构建时 NODE_ENV=production，此块被裁掉） */}
         {process.env.NODE_ENV === 'development' && (
           <>

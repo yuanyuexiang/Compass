@@ -8,6 +8,7 @@ from app.models.public import (
 )
 from app.models.tenant import (
     CompanyProfile,
+    LlmUsage,
     MatchResult,
     Notification,
     ProfileChunk,
@@ -21,6 +22,7 @@ __all__ = [
     "AnnouncementStatus",
     "Attachment",
     "CompanyProfile",
+    "LlmUsage",
     "MatchResult",
     "Notification",
     "ProfileChunk",

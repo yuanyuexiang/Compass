@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.llm_config import extract_completion
 from app.ai.prompts.match_v1 import MATCH_SYSTEM_PROMPT_V1
+from app.core.kv import DEFAULT_QUOTA_MATCH, KEY_QUOTA_MATCH, get_setting
+from app.core.ratelimit import try_consume_quota
 from app.matching.schemas import MatchScoreCard
 from app.models import Announcement, CompanyProfile, MatchResult, ProfileChunk, Project
 from app.opportunity import is_biddable
@@ -100,7 +102,7 @@ def build_match_input(project: Project, ann: Announcement, profile: CompanyProfi
     )
 
 
-def llm_rerank(input_text: str) -> MatchScoreCard:
+def llm_rerank(input_text: str, tenant_id: int | None = None) -> MatchScoreCard:
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
@@ -110,6 +112,8 @@ def llm_rerank(input_text: str) -> MatchScoreCard:
                     {"role": "user", "content": input_text},
                 ],
                 temperature=0.0,
+                scene="match",
+                tenant_id=tenant_id,
             )
             content = resp.choices[0].message.content
             if not content or not content.strip():
@@ -150,7 +154,15 @@ def run_match(session: Session, project_id: int, tenant_id: int) -> MatchResult 
         logger.info("向量粗排未召回 tenant=%s project=%s", tenant_id, project_id)
         return None
 
-    card = llm_rerank(build_match_input(project, ann, profile))
+    # 每日精排配额（成本护栏）：超额跳过，公告仍可检索，只是当天不再产生新推荐
+    quota = int(get_setting(session, KEY_QUOTA_MATCH, DEFAULT_QUOTA_MATCH))
+    if not try_consume_quota(tenant_id, "match", quota):
+        logger.warning(
+            "租户 %s 当日精排配额（%d）已用完，跳过 project=%s", tenant_id, quota, project_id
+        )
+        return None
+
+    card = llm_rerank(build_match_input(project, ann, profile), tenant_id)
     result = MatchResult(
         tenant_id=tenant_id,
         project_id=project_id,

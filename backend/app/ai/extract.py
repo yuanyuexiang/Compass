@@ -41,6 +41,7 @@ def extract_project(input_text: str) -> ExtractionResult:
                     {"role": "user", "content": input_text},
                 ],
                 temperature=0.0,
+                scene="extract",
             )
             content = resp.choices[0].message.content
             if not content or not content.strip():

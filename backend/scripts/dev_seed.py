@@ -66,11 +66,12 @@ def main() -> None:
                     tenant_id=tenant.id,
                     username=username,
                     password_hash=hash_password(password),
-                    role="tenant_admin",
+                    role="platform_admin",  # 种子账号兼平台管理员：负责租户审批与用量报表
                 )
             )
         else:
             user.password_hash = hash_password(password)  # 重跑可重置密码
+            user.role = "platform_admin"  # 存量库回填平台管理员角色
         if session.scalar(
             select(Subscription).where(Subscription.tenant_id == tenant.id)
         ) is None:

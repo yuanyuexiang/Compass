@@ -26,7 +26,7 @@ DRAFT_FIELDS = (
 )
 
 
-def suggest_profile(name: str) -> dict:
+def suggest_profile(name: str, tenant_id: int | None = None) -> dict:
     """返回 {draft, sources, confidence, note}；draft 结构对齐画像描述字段。"""
     results = websearch.search(f"{name} 主营业务 产品 服务 资质 案例", size=8)
     if not results:
@@ -46,6 +46,8 @@ def suggest_profile(name: str) -> dict:
             {"role": "user", "content": f"企业名称：{name}\n\n搜索结果：\n{context}"},
         ],
         temperature=0.1,
+        scene="profile_suggest",
+        tenant_id=tenant_id,
     )
     return _parse(resp.choices[0].message.content, name, results)
 

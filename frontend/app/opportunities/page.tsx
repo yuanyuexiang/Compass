@@ -230,6 +230,11 @@ export default function OpportunitiesPage() {
                 onSearch={(v) => doNlSearch(v)}
                 allowClear
               />
+              {nlResult?.degraded === 'quota' ? (
+                <Typography.Text type="warning" style={{ fontSize: 13 }}>
+                  今日 AI 搜索次数已用完，已按关键词搜索
+                </Typography.Text>
+              ) : null}
               {nlResult ? (
                 <Space size={[6, 6]} wrap>
                   <Typography.Text type="secondary" style={{ fontSize: 13 }}>
