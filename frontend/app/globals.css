@@ -31,6 +31,13 @@ a {
   background: linear-gradient(180deg, #0f1b3d 0%, #1d2e5c 100%) !important;
 }
 
+/* 首帧禁用宽度过渡：挂载时同步 localStorage 折叠态是瞬时定位，不该播收合动画 */
+.ant-layout-sider.sider-no-anim,
+.sider-no-anim .ant-menu,
+.sider-no-anim .ant-menu-item {
+  transition: none !important;
+}
+
 /* 侧栏纵向三段：品牌区 / 菜单（可滚动）/ 底部用户卡片 */
 .sider-inner {
   display: flex;

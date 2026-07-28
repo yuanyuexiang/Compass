@@ -26,6 +26,10 @@ import type { User } from '@/lib/types';
 
 const SIDER_COLLAPSED_KEY = 'compass-sider-collapsed';
 
+// 模块级缓存：AppLayout 随页面切换卸载重建，若每次都从默认值起步再等 effect 读
+// localStorage，会闪一次「展开→折叠」。缓存后新实例首帧即是正确状态。
+let collapsedCache: boolean | null = null;
+
 const ROLE_LABELS: Record<string, string> = {
   platform_admin: '平台管理员',
   tenant_admin: '企业管理员',
@@ -122,15 +126,23 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [unread, setUnread] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
+  // 首屏（缓存为空）与 SSR 一致地从展开态起步，避免水合不一致；页面间切换直接取缓存
+  const [collapsed, setCollapsed] = useState(collapsedCache ?? false);
+  // 首帧禁用宽度过渡：硬刷新时从 localStorage 同步折叠态是瞬时定位，不播收合动画
+  const [animReady, setAnimReady] = useState(false);
 
-  // 折叠状态记忆（挂载后读取，避免 SSR 水合不一致）
   useEffect(() => {
-    setCollapsed(localStorage.getItem(SIDER_COLLAPSED_KEY) === '1');
+    if (collapsedCache === null) {
+      collapsedCache = localStorage.getItem(SIDER_COLLAPSED_KEY) === '1';
+      setCollapsed(collapsedCache);
+    }
+    const timer = setTimeout(() => setAnimReady(true), 80);
+    return () => clearTimeout(timer);
   }, []);
 
   const toggleCollapsed = () => {
     setCollapsed((c) => {
+      collapsedCache = !c;
       localStorage.setItem(SIDER_COLLAPSED_KEY, c ? '0' : '1');
       return !c;
     });
@@ -172,7 +184,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
         collapsed={collapsed}
         trigger={null}
         theme="dark"
-        className="compass-sider"
+        className={`compass-sider${animReady ? '' : ' sider-no-anim'}`}
         style={{ position: 'sticky', top: 0, height: '100vh' }}
       >
         <div className="sider-inner">
