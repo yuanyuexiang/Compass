@@ -105,6 +105,8 @@ export default function SourcesPage() {
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [form] = Form.useForm();
   const watchedAdapter = Form.useWatch('adapter', form);
+  // 「高级设置」折叠面板展开状态：编辑时默认展开；校验失败时自动展开露出错误提示
+  const [advOpen, setAdvOpen] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -287,6 +289,7 @@ export default function SourcesPage() {
     setTestResult(null);
     setSmartResult(null);
     setSmartUrl('');
+    setAdvOpen(record ? ['adv'] : []);
     setModalOpen(true);
     form.setFieldsValue(
       record
@@ -306,7 +309,15 @@ export default function SourcesPage() {
   };
 
   const submit = async () => {
-    const values = await form.validateFields();
+    let values: Awaited<ReturnType<typeof form.validateFields>>;
+    try {
+      values = await form.validateFields();
+    } catch {
+      // 必填项未过（多半是没选平台适配器）：自动展开高级设置让错误提示可见
+      setAdvOpen(['adv']);
+      message.warning('请先用「智能识别」自动配置，或在「高级设置」中选择平台适配器');
+      return;
+    }
     const config = (values.config as object) || {};
     setSaving(true);
     try {
@@ -678,11 +689,15 @@ export default function SourcesPage() {
 
           <Collapse
             ghost
-            defaultActiveKey={editing ? ['adv'] : []}
+            activeKey={advOpen}
+            onChange={(keys) => setAdvOpen(typeof keys === 'string' ? [keys] : keys)}
             style={{ marginBottom: 8 }}
             items={[
               {
                 key: 'adv',
+                // 收起时也保持挂载：适配器/限速等字段必须始终注册进表单，
+                // 否则校验被跳过、提交丢字段（历史缺陷：收起状态创建 → 422 adapter 缺失）
+                forceRender: true,
                 label: (
                   <Typography.Text type="secondary">
                     高级设置（手动选择适配器与选择器，覆盖智能识别结果）
