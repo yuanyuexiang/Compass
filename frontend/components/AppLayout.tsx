@@ -3,8 +3,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Avatar, Badge, Breadcrumb, Button, Layout, Menu, Space, Typography } from 'antd';
+import { Avatar, Badge, Breadcrumb, Button, Layout, Menu, Space, Tooltip, Typography } from 'antd';
 import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
+import type { MenuProps } from 'antd';
 import {
   ApartmentOutlined,
   BellOutlined,
@@ -14,12 +15,22 @@ import {
   HomeOutlined,
   IdcardOutlined,
   LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   MessageOutlined,
   SearchOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
 import { apiFetch, clearSession, getCachedUser, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
+
+const SIDER_COLLAPSED_KEY = 'compass-sider-collapsed';
+
+const ROLE_LABELS: Record<string, string> = {
+  platform_admin: '平台管理员',
+  tenant_admin: '企业管理员',
+  sales: '成员',
+};
 
 const MENU_ITEMS = [
   { key: '/', icon: <DashboardOutlined />, label: <Link href="/">工作台</Link> },
@@ -41,10 +52,13 @@ const PLATFORM_MENU_ITEMS = [
 
 const ADMIN_ROLES = ['tenant_admin', 'platform_admin'];
 
-function menuItemsFor(role: string | undefined) {
-  const items = [...MENU_ITEMS];
-  if (ADMIN_ROLES.includes(role ?? '')) items.push(...ADMIN_MENU_ITEMS);
-  if (role === 'platform_admin') items.push(...PLATFORM_MENU_ITEMS);
+function menuItemsFor(role: string | undefined): MenuProps['items'] {
+  const admin = [
+    ...(ADMIN_ROLES.includes(role ?? '') ? ADMIN_MENU_ITEMS : []),
+    ...(role === 'platform_admin' ? PLATFORM_MENU_ITEMS : []),
+  ];
+  const items: MenuProps['items'] = [{ type: 'group', label: '工作区', children: MENU_ITEMS }];
+  if (admin.length) items.push({ type: 'group', label: '管理', children: admin });
   return items;
 }
 
@@ -102,6 +116,19 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [unread, setUnread] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
+
+  // 折叠状态记忆（挂载后读取，避免 SSR 水合不一致）
+  useEffect(() => {
+    setCollapsed(localStorage.getItem(SIDER_COLLAPSED_KEY) === '1');
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      localStorage.setItem(SIDER_COLLAPSED_KEY, c ? '0' : '1');
+      return !c;
+    });
+  };
 
   useEffect(() => {
     if (!getToken()) {
@@ -132,42 +159,82 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Layout.Sider width={208} theme="dark" className="compass-sider">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '20px 20px 16px',
-          }}
-        >
-          <CompassOutlined style={{ fontSize: 30, color: '#FAAD14' }} />
-          <div>
-            <div style={{ color: '#fff', fontSize: 20, fontWeight: 600, lineHeight: 1.25 }}>司南</div>
-            <div style={{ color: '#8C9BC4', fontSize: 12 }}>AI 寻标 Agent</div>
+      <Layout.Sider
+        width={208}
+        collapsedWidth={72}
+        collapsible
+        collapsed={collapsed}
+        trigger={null}
+        theme="dark"
+        className="compass-sider"
+        style={{ position: 'sticky', top: 0, height: '100vh' }}
+      >
+        <div className="sider-inner">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              gap: 12,
+              padding: collapsed ? '20px 0 16px' : '20px 20px 16px',
+            }}
+          >
+            <CompassOutlined style={{ fontSize: 30, color: '#FAAD14' }} />
+            {!collapsed ? (
+              <div>
+                <div style={{ color: '#fff', fontSize: 20, fontWeight: 600, lineHeight: 1.25 }}>司南</div>
+                <div style={{ color: '#8C9BC4', fontSize: 12 }}>AI 寻标 Agent</div>
+              </div>
+            ) : null}
           </div>
+          <Menu
+            theme="dark"
+            mode="inline"
+            selectedKeys={[selectedMenuKey(pathname)]}
+            items={menuItemsFor(user?.role)}
+            style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}
+          />
+          <Tooltip title={collapsed ? `${user?.username ?? ''}（${ROLE_LABELS[user?.role ?? ''] ?? ''}）` : ''} placement="right">
+            <div className="sider-footer">
+              <Avatar size={30} style={{ background: '#2F54EB', fontSize: 13, flexShrink: 0 }}>
+                {avatarChar}
+              </Avatar>
+              {!collapsed ? (
+                <div style={{ minWidth: 0 }}>
+                  <div className="sider-footer-name">{user?.username ?? ''}</div>
+                  <div className="sider-footer-role">{ROLE_LABELS[user?.role ?? ''] ?? ''}</div>
+                </div>
+              ) : null}
+            </div>
+          </Tooltip>
         </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[selectedMenuKey(pathname)]}
-          items={menuItemsFor(user?.role)}
-        />
       </Layout.Sider>
       <Layout>
         <Layout.Header
+          className="compass-header"
           style={{
             background: '#fff',
-            padding: '0 24px',
+            padding: '0 16px 0 8px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             borderBottom: '1px solid #F0F0F0',
             height: 56,
             lineHeight: '56px',
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
           }}
         >
-          <Breadcrumb items={breadcrumbItems(pathname)} style={{ fontSize: 14 }} />
+          <Space size={4}>
+            <Button
+              type="text"
+              aria-label={collapsed ? '展开导航' : '收起导航'}
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={toggleCollapsed}
+            />
+            <Breadcrumb items={breadcrumbItems(pathname)} style={{ fontSize: 14 }} />
+          </Space>
           <Space size="middle">
             <Badge count={unread} size="small" offset={[-2, 4]}>
               <Button

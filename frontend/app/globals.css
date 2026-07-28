@@ -31,19 +31,69 @@ a {
   background: linear-gradient(180deg, #0f1b3d 0%, #1d2e5c 100%) !important;
 }
 
+/* 侧栏纵向三段：品牌区 / 菜单（可滚动）/ 底部用户卡片 */
+.sider-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .compass-sider .ant-menu {
   background: transparent !important;
 }
 
 .compass-sider .ant-menu-item {
   position: relative;
-  font-size: 18px;
-  height: 46px;
-  line-height: 46px;
+  font-size: 15px;
+  height: 44px;
+  line-height: 44px;
 }
 
 .compass-sider .ant-menu-item .anticon {
-  font-size: 17px;
+  font-size: 16px;
+}
+
+.compass-sider .ant-menu-item:not(.ant-menu-item-selected):hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* 菜单分组标题（工作区/管理）：弱化的小号大写风格 */
+.compass-sider .ant-menu-item-group-title {
+  color: rgba(255, 255, 255, 0.35) !important;
+  font-size: 11px;
+  letter-spacing: 2px;
+  padding: 14px 24px 6px;
+}
+
+.compass-sider .ant-menu-inline-collapsed .ant-menu-item-group-title {
+  display: none;
+}
+
+/* 底部用户卡片 */
+.sider-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 8px 10px 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sider-footer-name {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sider-footer-role {
+  color: #8c9bc4;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 /* 折叠态：图标水平居中、隐藏文字 */
