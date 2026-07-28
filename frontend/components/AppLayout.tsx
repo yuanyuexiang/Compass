@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Avatar, Badge, Breadcrumb, Button, Layout, Menu, Space, Tooltip, Typography } from 'antd';
+import { Avatar, Badge, Breadcrumb, Button, Dropdown, Layout, Menu, Space, Tooltip, Typography } from 'antd';
 import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
 import type { MenuProps } from 'antd';
 import {
@@ -19,9 +19,11 @@ import {
   MenuUnfoldOutlined,
   MessageOutlined,
   SearchOutlined,
+  SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
 import { apiFetch, clearSession, getCachedUser, getToken } from '@/lib/api';
+import SelfSettingsModal from '@/components/SelfSettingsModal';
 import type { User } from '@/lib/types';
 
 const SIDER_COLLAPSED_KEY = 'compass-sider-collapsed';
@@ -173,6 +175,25 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
     router.replace('/login');
   };
 
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const onSelfUpdated = (u: User) => {
+    setUser(u);
+    localStorage.setItem('user', JSON.stringify(u));
+  };
+
+  const userMenu = {
+    items: [
+      { key: 'settings', icon: <SettingOutlined />, label: '个人设置' },
+      { type: 'divider' as const },
+      { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' },
+    ],
+    onClick: ({ key }: { key: string }) => {
+      if (key === 'settings') setSettingsOpen(true);
+      if (key === 'logout') logout();
+    },
+  };
+
   const avatarChar = (user?.username ?? '?').slice(0, 1).toUpperCase();
 
   return (
@@ -212,8 +233,15 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
             items={menuItemsFor(user?.role, collapsed)}
             style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}
           />
-          <Tooltip title={collapsed ? `${user?.username ?? ''}（${ROLE_LABELS[user?.role ?? ''] ?? ''}）` : ''} placement="right">
-            <div className="sider-footer">
+          <Tooltip
+            title={collapsed ? `${user?.username ?? ''}（${ROLE_LABELS[user?.role ?? ''] ?? ''}）· 点击进入个人设置` : ''}
+            placement="right"
+          >
+            <div
+              className="sider-footer"
+              style={{ cursor: 'pointer' }}
+              onClick={() => setSettingsOpen(true)}
+            >
               <Avatar size={30} style={{ background: '#2F54EB', fontSize: 13, flexShrink: 0 }}>
                 {avatarChar}
               </Avatar>
@@ -262,13 +290,15 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
                 onClick={() => router.push('/notifications')}
               />
             </Badge>
-            <Space size={8}>
-              <Avatar size={32} style={{ background: '#2F54EB', fontSize: 14 }}>
-                {avatarChar}
-              </Avatar>
-              <Typography.Text strong>{user?.tenant_name ?? ''}</Typography.Text>
-              <Typography.Text type="secondary">{user?.username ?? ''}</Typography.Text>
-            </Space>
+            <Dropdown menu={userMenu} trigger={['click']}>
+              <Space size={8} style={{ cursor: 'pointer' }}>
+                <Avatar size={32} style={{ background: '#2F54EB', fontSize: 14 }}>
+                  {avatarChar}
+                </Avatar>
+                <Typography.Text strong>{user?.tenant_name ?? ''}</Typography.Text>
+                <Typography.Text type="secondary">{user?.username ?? ''}</Typography.Text>
+              </Space>
+            </Dropdown>
             <Button icon={<LogoutOutlined />} onClick={logout}>
               退出
             </Button>
@@ -286,6 +316,12 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
           {children}
         </Layout.Content>
       </Layout>
+      <SelfSettingsModal
+        open={settingsOpen}
+        user={user}
+        onClose={() => setSettingsOpen(false)}
+        onUpdated={onSelfUpdated}
+      />
     </Layout>
   );
 }

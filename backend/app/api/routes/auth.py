@@ -97,3 +97,42 @@ def me(current: CurrentUser = CurrentUserDep) -> dict:
             raise HTTPException(status_code=401, detail="用户不存在")
         tenant = session.get(Tenant, user.tenant_id)
         return _user_info(user, tenant.name)
+
+
+class MeUpdateIn(BaseModel):
+    email: str = ""
+
+
+@router.put("/me")
+def update_me(body: MeUpdateIn, current: CurrentUser = CurrentUserDep) -> dict:
+    """自助修改个人信息（当前仅邮箱；用户名是登录标识不可改）。"""
+    email = body.email.strip()
+    if email and ("@" not in email or len(email) > 128):
+        raise HTTPException(status_code=422, detail="邮箱格式不正确")
+    with session_scope() as session:
+        user = session.get(User, current.user_id)
+        if user is None:
+            raise HTTPException(status_code=401, detail="用户不存在")
+        user.email = email or None
+        tenant = session.get(Tenant, user.tenant_id)
+        return _user_info(user, tenant.name)
+
+
+class PasswordChangeIn(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@router.post("/me/password")
+def change_my_password(body: PasswordChangeIn, current: CurrentUser = CurrentUserDep) -> dict:
+    """自助改密码：验证原密码 + 新密码强度。改完旧登录态仍有效（JWT 无状态）。"""
+    if reason := validate_password(body.new_password):
+        raise HTTPException(status_code=422, detail=reason)
+    with session_scope() as session:
+        user = session.get(User, current.user_id)
+        if user is None:
+            raise HTTPException(status_code=401, detail="用户不存在")
+        if not verify_password(body.old_password, user.password_hash):
+            raise HTTPException(status_code=403, detail="原密码不正确")
+        user.password_hash = hash_password(body.new_password)
+    return {"ok": True}
