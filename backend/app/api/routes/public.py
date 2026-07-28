@@ -30,6 +30,7 @@ def list_announcements(
     region: str | None = None,
     status: str | None = None,
     all_regions: bool = False,
+    include_results: bool = False,
     limit: int = Query(default=20, le=100),
     offset: int = 0,
     current: CurrentUser = CurrentUserDep,
@@ -39,6 +40,9 @@ def list_announcements(
         stmt = select(Announcement).join(
             Project, Project.announcement_id == Announcement.id, isouter=True
         )
+        # 默认隐藏中标/成交/废标等结果类公告（已无法投标，与推荐口径一致）；开关可放开看竞争情报
+        if not include_results:
+            stmt = stmt.where(Announcement.biddable.isnot(False))
         if keyword:
             stmt = stmt.where(Announcement.title.ilike(f"%{keyword}%"))
         # 地区口径：显式地区参数优先；否则默认按画像「仅关注地区」；all_regions=True 时不限制
@@ -94,8 +98,10 @@ def stats(current: CurrentUser = CurrentUserDep) -> dict:
     """工作台统计。流水线明细（by_status）是平台运营指标，仅平台管理员可见；
     租户看「可见公告数」——与商机查询同口径（画像地区 + 关注数据源）。"""
     with session_scope() as session:
-        visible_stmt = select(Announcement.id).join(
-            Project, Project.announcement_id == Announcement.id, isouter=True
+        visible_stmt = (
+            select(Announcement.id)
+            .join(Project, Project.announcement_id == Announcement.id, isouter=True)
+            .where(Announcement.biddable.isnot(False))  # 只数还能投的，与商机查询默认口径一致
         )
         if (
             clause := region_filter_clause(get_filter_regions(session, current.tenant_id))

@@ -29,6 +29,7 @@ from app.models import (
     Tenant,
 )
 from app.notify.dispatcher import dispatch_daily_digest, dispatch_match
+from app.opportunity import is_biddable
 from app.parsing.clean import html_to_text
 from app.parsing.documents import parse_attachment
 from app.tasks.celery_app import celery
@@ -54,6 +55,7 @@ def run_crawl_source(session: Session, source: Source, limit: int | None = None)
                 fingerprint=fp,
                 title=raw.title,
                 ann_type=raw.ann_type,
+                biddable=is_biddable(raw.ann_type, raw.title),
                 region=raw.region,
                 buyer=raw.buyer,
                 publish_time=raw.publish_time,
@@ -209,6 +211,7 @@ def run_embed_and_publish(session: Session, announcement_id: int) -> None:
     if embeddings.available() and project.summary:
         project.embedding = embeddings.embed_texts([project.summary])[0]
         ann.status = AnnouncementStatus.EMBEDDED.value
+    ann.biddable = is_biddable(ann.ann_type, ann.title)
     ann.status = AnnouncementStatus.PUBLISHED.value
 
 
@@ -227,9 +230,11 @@ def publish_task(announcement_id: int) -> None:
         project = session.scalar(
             select(Project.id).where(Project.announcement_id == announcement_id)
         )
-        source_id = session.scalar(
-            select(Announcement.source_id).where(Announcement.id == announcement_id)
-        )
+        source_id, biddable = session.execute(
+            select(Announcement.source_id, Announcement.biddable).where(
+                Announcement.id == announcement_id
+            )
+        ).one()
         tenant_ids = session.scalars(
             select(Tenant.id)
             .join(CompanyProfile, CompanyProfile.tenant_id == Tenant.id)
@@ -239,6 +244,8 @@ def publish_task(announcement_id: int) -> None:
         watched_map = dict(
             session.execute(select(Subscription.tenant_id, Subscription.source_ids)).all()
         )
+    if biddable is False:  # 中标/成交/废标等结果公告：入库可查（开关放开），但不派发匹配
+        return
     for tenant_id in tenant_ids:
         if not tenant_watches_source(watched_map.get(tenant_id) or [], source_id):
             continue

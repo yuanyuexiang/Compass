@@ -21,9 +21,9 @@ export REGISTRY NAMESPACE TAG
 docker compose -f docker-compose.prod.yml --env-file .env pull -q
 docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
 
-# 建表（幂等；schema 迁移改用 Alembic 后替换此行）
+# 建表（幂等；schema 迁移改用 Alembic 后替换此行）+ 存量数据回填（只处理空值行，重复执行无副作用）
 docker compose -f docker-compose.prod.yml --env-file .env run --rm --no-deps api \
-  python -c "from app.core.db import init_db; init_db()"
+  sh -c "python -c 'from app.core.db import init_db; init_db()' && python scripts/backfill_biddable.py"
 
 docker image prune -f > /dev/null
 echo "✅ 部署完成：TAG=$TAG"

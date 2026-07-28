@@ -70,6 +70,8 @@ class Announcement(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     title: Mapped[str] = mapped_column(Text)
     ann_type: Mapped[str | None] = mapped_column(String(32))
+    # 可投标判定（app/opportunity.is_biddable，采集/发布时写入）；NULL 视同可投标（宽容）
+    biddable: Mapped[bool | None] = mapped_column(Boolean)
     region: Mapped[str | None] = mapped_column(String(32))
     buyer: Mapped[str | None] = mapped_column(Text)
     publish_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

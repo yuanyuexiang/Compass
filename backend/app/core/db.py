@@ -40,6 +40,7 @@ MIGRATIONS = [
     "ALTER TABLE sources ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active'",
     "ALTER TABLE sources ADD COLUMN IF NOT EXISTS created_by_tenant_id BIGINT",
     "ALTER TABLE sources ADD COLUMN IF NOT EXISTS reject_reason TEXT",
+    "ALTER TABLE announcements ADD COLUMN IF NOT EXISTS biddable BOOLEAN",
 ]
 
 

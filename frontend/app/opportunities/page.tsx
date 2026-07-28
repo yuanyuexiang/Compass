@@ -20,6 +20,7 @@ type SavedState = {
   region?: string;
   page?: number;
   onlyMyRegion?: boolean;
+  includeResults?: boolean;
   nlQuery?: string;
   nlResult?: NlSearchResult | null;
   nlFilters?: [string, unknown][];
@@ -53,8 +54,11 @@ export default function OpportunitiesPage() {
   const [profileRegions, setProfileRegions] = useState<string[]>([]);
   const [onlyMyRegion, setOnlyMyRegion] = useState(true);
   const regionScoped = profileRegions.length > 0 && !profileRegions.includes('全国');
+  // 中标/成交等结果类公告默认隐藏（已无法投标）；打开可看竞争情报
+  const [includeResults, setIncludeResults] = useState(false);
 
-  const load = useCallback(async (p: number, kw: string, rg: string, onlyRegion: boolean) => {
+  const load = useCallback(
+    async (p: number, kw: string, rg: string, onlyRegion: boolean, incResults: boolean) => {
     setLoading(true);
     setError(null);
     try {
@@ -65,6 +69,7 @@ export default function OpportunitiesPage() {
       if (kw) params.set('keyword', kw);
       if (rg) params.set('region', rg);
       if (!onlyRegion) params.set('all_regions', 'true');
+      if (incResults) params.set('include_results', 'true');
       const data = await apiFetch<AnnouncementList>(`/api/announcements?${params.toString()}`);
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);
@@ -76,7 +81,9 @@ export default function OpportunitiesPage() {
       setLoading(false);
       setFirstLoad(false);
     }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
     const saved = readSavedState();
@@ -84,16 +91,18 @@ export default function OpportunitiesPage() {
     const kw = saved.keyword ?? '';
     const rg = saved.region ?? '';
     const only = saved.onlyMyRegion ?? true;
+    const inc = saved.includeResults ?? false;
     setKeyword(kw);
     setRegion(rg);
     setPage(p);
     setOnlyMyRegion(only);
+    setIncludeResults(inc);
     if (saved.nlResult) {
       setNlQuery(saved.nlQuery ?? '');
       setNlResult(saved.nlResult);
       setNlFilters(saved.nlFilters ?? []);
     }
-    load(p, kw, rg, only);
+    load(p, kw, rg, only, inc);
   }, [load]);
 
   // 状态变化即存 sessionStorage；跳过首次（恢复前的默认值），避免覆盖已存条件
@@ -103,9 +112,11 @@ export default function OpportunitiesPage() {
       skipFirstSave.current = false;
       return;
     }
-    const state: SavedState = { keyword, region, page, onlyMyRegion, nlQuery, nlResult, nlFilters };
+    const state: SavedState = {
+      keyword, region, page, onlyMyRegion, includeResults, nlQuery, nlResult, nlFilters,
+    };
     sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
-  }, [keyword, region, page, onlyMyRegion, nlQuery, nlResult, nlFilters]);
+  }, [keyword, region, page, onlyMyRegion, includeResults, nlQuery, nlResult, nlFilters]);
 
   // 拉画像「仅关注地区」用于开关展示；过滤本身由后端按画像执行，此处不影响正确性
   useEffect(() => {
@@ -119,17 +130,21 @@ export default function OpportunitiesPage() {
   const doSearch = () => {
     setNlResult(null);
     setPage(1);
-    load(1, keyword, region, onlyMyRegion);
+    load(1, keyword, region, onlyMyRegion, includeResults);
   };
 
-  const doNlSearch = async (q: string, onlyRegion = onlyMyRegion) => {
+  const doNlSearch = async (q: string, onlyRegion = onlyMyRegion, incResults = includeResults) => {
     if (!q.trim()) return;
     setNlLoading(true);
     setError(null);
     try {
       const data = await apiFetch<NlSearchResult>('/api/search/nl', {
         method: 'POST',
-        body: JSON.stringify({ query: q.trim(), all_regions: !onlyRegion }),
+        body: JSON.stringify({
+          query: q.trim(),
+          all_regions: !onlyRegion,
+          include_results: incResults,
+        }),
       });
       setNlResult(data);
       setNlFilters(
@@ -156,7 +171,18 @@ export default function OpportunitiesPage() {
       doNlSearch(nlQuery, v);
     } else {
       setPage(1);
-      load(1, keyword, region, v);
+      load(1, keyword, region, v, includeResults);
+    }
+  };
+
+  // 切换是否显示中标/成交等结果类公告（同样作用于两种搜索模式）
+  const toggleResults = (v: boolean) => {
+    setIncludeResults(v);
+    if (nlResult) {
+      doNlSearch(nlQuery, onlyMyRegion, v);
+    } else {
+      setPage(1);
+      load(1, keyword, region, onlyMyRegion, v);
     }
   };
 
@@ -268,30 +294,37 @@ export default function OpportunitiesPage() {
           </div>
         </div>
 
-        {regionScoped ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              flexWrap: 'wrap',
-              padding: '0 4px',
-            }}
-          >
-            <Switch size="small" checked={onlyMyRegion} onChange={toggleRegion} />
-            <Typography.Text style={{ fontSize: 13 }}>仅看关注地区</Typography.Text>
-            <Space size={4} wrap>
-              {profileRegions.map((r) => (
-                <Tag key={r} color={onlyMyRegion ? 'blue' : 'default'} icon={<EnvironmentOutlined />}>
-                  {r}
-                </Tag>
-              ))}
-            </Space>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {onlyMyRegion ? '与推荐口径一致，只显示画像关注地区的商机' : '已放开限制，显示全部地区'}
-            </Typography.Text>
-          </div>
-        ) : null}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            flexWrap: 'wrap',
+            padding: '0 4px',
+          }}
+        >
+          {regionScoped ? (
+            <>
+              <Switch size="small" checked={onlyMyRegion} onChange={toggleRegion} />
+              <Typography.Text style={{ fontSize: 13 }}>仅看关注地区</Typography.Text>
+              <Space size={4} wrap>
+                {profileRegions.map((r) => (
+                  <Tag key={r} color={onlyMyRegion ? 'blue' : 'default'} icon={<EnvironmentOutlined />}>
+                    {r}
+                  </Tag>
+                ))}
+              </Space>
+              <span style={{ width: 12 }} />
+            </>
+          ) : null}
+          <Switch size="small" checked={includeResults} onChange={toggleResults} />
+          <Typography.Text style={{ fontSize: 13 }}>包含结果公告</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {includeResults
+              ? '正在显示中标/成交/废标等已结束公告（竞争情报参考）'
+              : '已隐藏中标/成交/废标等已结束公告，只看还能投的'}
+          </Typography.Text>
+        </div>
 
         <Card
           className="compass-card"
@@ -352,7 +385,7 @@ export default function OpportunitiesPage() {
                       showTotal: (t) => `共 ${t} 条`,
                       onChange: (p) => {
                         setPage(p);
-                        load(p, keyword, region, onlyMyRegion);
+                        load(p, keyword, region, onlyMyRegion, includeResults);
                       },
                     }
               }

@@ -228,6 +228,7 @@ def mark_read(notification_id: int, current: CurrentUser = CurrentUserDep) -> di
 class NlSearchIn(BaseModel):
     query: str
     all_regions: bool = False
+    include_results: bool = False
 
 
 @router.post("/search/nl")
@@ -245,6 +246,9 @@ def nl_search(body: NlSearchIn, current: CurrentUser = CurrentUserDep) -> dict:
             .order_by(Announcement.publish_time.desc().nullslast())
             .limit(200)
         )
+        # 与普通查询同口径：默认隐藏结果类公告
+        if not body.include_results:
+            stmt = stmt.where(Announcement.biddable.isnot(False))
         if keyword := filters.get("keyword"):
             stmt = stmt.where(Announcement.title.ilike(f"%{keyword}%"))
         # 地区口径与推荐/普通查询统一：句子里说了地区就用它，否则默认画像「仅关注地区」
