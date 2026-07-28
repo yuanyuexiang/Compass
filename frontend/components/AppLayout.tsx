@@ -52,11 +52,17 @@ const PLATFORM_MENU_ITEMS = [
 
 const ADMIN_ROLES = ['tenant_admin', 'platform_admin'];
 
-function menuItemsFor(role: string | undefined): MenuProps['items'] {
+function menuItemsFor(role: string | undefined, collapsed: boolean): MenuProps['items'] {
   const admin = [
     ...(ADMIN_ROLES.includes(role ?? '') ? ADMIN_MENU_ITEMS : []),
     ...(role === 'platform_admin' ? PLATFORM_MENU_ITEMS : []),
   ];
+  // 折叠态用扁平列表：antd 只对菜单直接子项做图标居中与悬停提示，嵌在分组里会失效
+  if (collapsed) {
+    return admin.length
+      ? [...MENU_ITEMS, { type: 'divider', style: { borderColor: 'rgba(255,255,255,.12)', margin: '8px 16px' } }, ...admin]
+      : [...MENU_ITEMS];
+  }
   const items: MenuProps['items'] = [{ type: 'group', label: '工作区', children: MENU_ITEMS }];
   if (admin.length) items.push({ type: 'group', label: '管理', children: admin });
   return items;
@@ -191,7 +197,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
             theme="dark"
             mode="inline"
             selectedKeys={[selectedMenuKey(pathname)]}
-            items={menuItemsFor(user?.role)}
+            items={menuItemsFor(user?.role, collapsed)}
             style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}
           />
           <Tooltip title={collapsed ? `${user?.username ?? ''}（${ROLE_LABELS[user?.role ?? ''] ?? ''}）` : ''} placement="right">

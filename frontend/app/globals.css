@@ -96,14 +96,14 @@ a {
   white-space: nowrap;
 }
 
-/* 折叠态：图标水平居中、隐藏文字 */
-.compass-sider .ant-menu-inline-collapsed .ant-menu-item {
-  padding-inline: 0 !important;
-  text-align: center;
-}
+/* 折叠态：交给 antd 原生居中（菜单直接子项才生效，故折叠时菜单用扁平结构）；
+   只微调图标大小，选中态改用圆角高亮块、隐藏金色侧条 */
 .compass-sider .ant-menu-inline-collapsed .ant-menu-item .anticon {
   font-size: 18px;
-  margin: 0 !important;
+}
+
+.compass-sider .ant-menu-inline-collapsed .ant-menu-item-selected::before {
+  display: none;
 }
 
 .compass-sider .ant-menu-item-selected {
