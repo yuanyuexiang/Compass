@@ -17,6 +17,7 @@ from app.ai.llm_config import extract_completion
 from app.ai.prompts.match_v1 import MATCH_SYSTEM_PROMPT_V1
 from app.core.kv import DEFAULT_QUOTA_MATCH, KEY_QUOTA_MATCH, get_setting
 from app.core.ratelimit import try_consume_quota
+from app.matching.profiles import region_stem
 from app.matching.schemas import MatchScoreCard
 from app.models import Announcement, CompanyProfile, MatchResult, ProfileChunk, Project
 from app.opportunity import is_biddable
@@ -50,7 +51,12 @@ def rule_filter(project: Project, profile_data: dict) -> tuple[bool, str]:
     if regions := flt.get("regions"):
         region = (fields.get("region") or {}).get("value") or ""
         province = region.split("/")[0]
-        if province and province not in regions and "全国" not in regions:
+        # 按地名主干比较：「广西」能命中画像里的「广西壮族自治区」（写法差异不误杀）
+        if (
+            province
+            and region_stem(province) not in {region_stem(r) for r in regions}
+            and "全国" not in regions
+        ):
             return False, f"区域不符: {region}"
 
     if (min_budget := flt.get("min_budget")) is not None:

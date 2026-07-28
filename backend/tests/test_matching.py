@@ -87,3 +87,14 @@ def test_scorecard_bad_advice_falls_back():
     card = MatchScoreCard(match_score=50, star=2, advice="随便看看")
     assert card.advice == "谨慎参与"
     assert RISK_KEYS[0] == "brand_restriction"
+
+
+def test_rule_filter_region_suffix_variants():
+    """公告写「广西/南宁」、画像写「广西壮族自治区」——按地名主干比较不误杀。"""
+    profile = {"filter": {"regions": ["广西壮族自治区"]}}
+    ok, _ = rule_filter(FakeProject(region="广西/南宁市"), profile)
+    assert ok
+    ok, _ = rule_filter(FakeProject(region="广西壮族自治区/南宁市"), profile)
+    assert ok
+    ok, reason = rule_filter(FakeProject(region="湖南省/长沙市"), profile)
+    assert not ok and "区域" in reason

@@ -28,14 +28,86 @@ const CONFIDENCE_TAG: Record<string, { color: string; label: string }> = {
   low: { color: 'red', label: '可信度低' },
 };
 
-const TAG_FIELDS: { name: keyof ProfileData; label: string; placeholder: string }[] = [
-  { name: 'products', label: '主要产品', placeholder: '输入后回车添加，如：视频会议终端' },
-  { name: 'services', label: '主要服务', placeholder: '如：系统集成、运维服务' },
-  { name: 'industries', label: '覆盖行业', placeholder: '如：政务、教育、医疗' },
-  { name: 'regions', label: '业务区域', placeholder: '如：江苏省、南京市' },
-  { name: 'certifications', label: '资质证书', placeholder: '如：ISO9001、CMMI3' },
-  { name: 'brands', label: '代理品牌', placeholder: '如：华为、海康威视' },
+// 标签输入的分隔符：顿号/逗号/分号粘贴整段自动切分成多个标签
+const TAG_SEPARATORS = [',', '，', '、', ';', '；'];
+const SEP_RE = /[,，、;；]/;
+
+const PROVINCE_OPTIONS = [
+  '全国', '北京市', '天津市', '河北省', '山西省', '内蒙古自治区', '辽宁省', '吉林省',
+  '黑龙江省', '上海市', '江苏省', '浙江省', '安徽省', '福建省', '江西省', '山东省',
+  '河南省', '湖北省', '湖南省', '广东省', '广西壮族自治区', '海南省', '重庆市',
+  '四川省', '贵州省', '云南省', '西藏自治区', '陕西省', '甘肃省', '青海省',
+  '宁夏回族自治区', '新疆维吾尔自治区',
 ];
+
+const INDUSTRY_OPTIONS = [
+  '政务', '教育', '医疗', '金融', '交通', '能源', '制造', '水利', '环保', '农业',
+  '文旅', '司法', '公安', '应急', '电信', '科研院所', '园区物业', '军队',
+];
+
+const PRODUCT_OPTIONS = [
+  '软件开发', '硬件开发', '系统集成', '智能化系统', '安防监控系统', '综合布线',
+  '机房工程', '弱电工程', '视频会议系统', '网络设备', '服务器与存储', '大数据平台',
+  '人工智能应用', '物联网设备', 'LED 显示屏', '广播系统', '楼宇自控',
+];
+
+const SERVICE_OPTIONS = [
+  '软件开发', '系统集成', '信息化运维', '智能化工程', '装饰装修工程', '展厅设计施工',
+  '展览展示服务', '广告设计制作', '数据治理', '网络安全服务', '咨询设计',
+  '设备维保', '机电安装',
+];
+
+const CERT_OPTIONS = [
+  'ISO9001', 'ISO14001', 'ISO20000', 'ISO27001', 'CMMI3', 'CMMI5',
+  'ITSS 运维能力成熟度', '高新技术企业', '安全生产许可证',
+  '建筑装修装饰工程专业承包一级', '建筑装修装饰工程专业承包二级',
+  '电子与智能化工程专业承包一级', '电子与智能化工程专业承包二级',
+  '建筑机电安装工程专业承包三级', '信息系统建设和服务能力评估 CS2',
+];
+
+const BRAND_OPTIONS = [
+  '华为', '海康威视', '大华', '新华三', '锐捷', '浪潮', '联想', '中兴',
+  '戴尔', '施耐德', '西门子', '霍尼韦尔',
+];
+
+const TAG_FIELDS: {
+  name: keyof ProfileData;
+  label: string;
+  placeholder: string;
+  options: string[];
+}[] = [
+  { name: 'products', label: '主要产品', placeholder: '下拉选择或输入，可整段粘贴自动切分', options: PRODUCT_OPTIONS },
+  { name: 'services', label: '主要服务', placeholder: '下拉选择或输入，可整段粘贴自动切分', options: SERVICE_OPTIONS },
+  { name: 'industries', label: '覆盖行业', placeholder: '下拉选择，也可输入自定义行业', options: INDUSTRY_OPTIONS },
+  { name: 'regions', label: '业务区域', placeholder: '下拉选省份，也可输入到市（如：南京市）', options: PROVINCE_OPTIONS },
+  { name: 'certifications', label: '资质证书', placeholder: '下拉选择常见资质，也可输入其他', options: CERT_OPTIONS },
+  { name: 'brands', label: '代理品牌', placeholder: '下拉选择或输入其他品牌', options: BRAND_OPTIONS },
+];
+
+/** 把「软件开发、硬件开发」这类连写标签切分成独立标签（兼容存量脏数据与整段粘贴） */
+function splitTags(list?: string[]): string[] {
+  const out: string[] = [];
+  for (const v of list ?? []) {
+    for (const part of String(v).split(SEP_RE)) {
+      const t = part.trim();
+      if (t && !out.includes(t)) out.push(t);
+    }
+  }
+  return out;
+}
+
+function normalizeProfile<T extends Partial<ProfileData>>(d: T): T {
+  return {
+    ...d,
+    products: splitTags(d.products),
+    services: splitTags(d.services),
+    industries: splitTags(d.industries),
+    regions: splitTags(d.regions),
+    certifications: splitTags(d.certifications),
+    brands: splitTags(d.brands),
+    filter: { ...d.filter, regions: splitTags(d.filter?.regions) },
+  };
+}
 
 export default function ProfilePage() {
   const { message } = App.useApp();
@@ -61,7 +133,7 @@ export default function ProfilePage() {
         method: 'POST',
         body: JSON.stringify({ name }),
       });
-      form.setFieldsValue(r.draft);
+      form.setFieldsValue(normalizeProfile(r.draft));
       setSuggestMeta({ sources: r.sources, confidence: r.confidence, note: r.note });
       message.success('已生成画像草稿，请核对补充后保存');
     } catch (e) {
@@ -74,7 +146,7 @@ export default function ProfilePage() {
   useEffect(() => {
     apiFetch<ProfileData>('/api/profile')
       .then((data) => {
-        form.setFieldsValue(data);
+        form.setFieldsValue(normalizeProfile(data));
         setError(null);
       })
       .catch((e: Error) => setError(e.message))
@@ -82,7 +154,7 @@ export default function ProfilePage() {
   }, [form]);
 
   const onFinish = async (values: ProfileData) => {
-    const payload: ProfileData = {
+    const payload: ProfileData = normalizeProfile({
       name: values.name ?? '',
       description: values.description ?? '',
       products: values.products ?? [],
@@ -96,7 +168,7 @@ export default function ProfilePage() {
         regions: values.filter?.regions ?? [],
         min_budget: values.filter?.min_budget ?? null,
       },
-    };
+    });
     setSaving(true);
     try {
       await apiFetch<{ ok: boolean }>('/api/profile', {
@@ -205,9 +277,9 @@ export default function ProfilePage() {
                       <Select
                         mode="tags"
                         placeholder={f.placeholder}
-                        open={false}
-                        suffixIcon={null}
-                        tokenSeparators={[',', '，']}
+                        options={f.options.map((v) => ({ value: v, label: v }))}
+                        tokenSeparators={TAG_SEPARATORS}
+                        allowClear
                       />
                     </Form.Item>
                   </Col>
@@ -224,13 +296,16 @@ export default function ProfilePage() {
             <Card className="compass-card" title="推荐过滤条件">
               <Row gutter={24}>
                 <Col xs={24} md={12}>
-                  <Form.Item name={['filter', 'regions']} label="仅关注地区">
+                  <Form.Item
+                    name={['filter', 'regions']}
+                    label="仅关注地区"
+                    extra="推荐与商机查询只看这些省份的项目；选「全国」或留空表示不限"
+                  >
                     <Select
-                      mode="tags"
+                      mode="multiple"
                       placeholder="留空表示不限地区"
-                      open={false}
-                      suffixIcon={null}
-                      tokenSeparators={[',', '，']}
+                      options={PROVINCE_OPTIONS.map((v) => ({ value: v, label: v }))}
+                      allowClear
                     />
                   </Form.Item>
                 </Col>

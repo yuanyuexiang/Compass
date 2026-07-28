@@ -45,17 +45,30 @@ def tenant_watches_source(source_ids: list[int], source_id: int) -> bool:
     return not source_ids or source_id in source_ids
 
 
+# 行政区划后缀（长后缀在前，避免「自治区」误剪「维吾尔自治区」的一部分）
+_REGION_SUFFIXES = ("维吾尔自治区", "壮族自治区", "回族自治区", "特别行政区", "自治区", "省", "市")
+
+
+def region_stem(region: str) -> str:
+    """去行政区划后缀取地名主干：江苏省→江苏、广西壮族自治区→广西、北京市→北京。"""
+    r = region.strip()
+    for suffix in _REGION_SUFFIXES:
+        if r.endswith(suffix) and len(r) > len(suffix):
+            return r[: -len(suffix)]
+    return r
+
+
 def region_filter_clause(regions: list[str]) -> ColumnElement[bool] | None:
     """画像地区列表 → 公告查询的地区过滤条件（引用 Project，故调用方需 outer join Project）。
 
-    去「省/市」后缀做 ilike，同时匹配列表元数据 region 与结构化字段 region（与 NL 搜索一致，
+    去行政区划后缀做 ilike，同时匹配列表元数据 region 与结构化字段 region（与 NL 搜索一致，
     兼容「江苏省」匹配「江苏/南京」「南京」）。列表为空或含「全国」→ 返回 None（不加地区限制）。
     """
     if not regions or "全国" in regions:
         return None
     clauses: list[ColumnElement[bool]] = []
     for r in regions:
-        pattern = f"%{r.rstrip('省市')}%"
+        pattern = f"%{region_stem(r)}%"
         clauses.append(Announcement.region.ilike(pattern))
         clauses.append(Project.fields["region"]["value"].astext.ilike(pattern))
     return or_(*clauses)

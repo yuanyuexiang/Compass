@@ -25,3 +25,16 @@ def test_tenant_watches_source():
     assert tenant_watches_source([], 5)
     assert tenant_watches_source([1, 5], 5)
     assert not tenant_watches_source([1, 2], 5)
+
+
+def test_region_stem():
+    """行政区划后缀剥离：省/市/自治区写法差异归一到地名主干。"""
+    from app.matching.profiles import region_stem
+
+    assert region_stem("江苏省") == "江苏"
+    assert region_stem("北京市") == "北京"
+    assert region_stem("广西壮族自治区") == "广西"
+    assert region_stem("新疆维吾尔自治区") == "新疆"
+    assert region_stem("内蒙古自治区") == "内蒙古"
+    assert region_stem("江苏") == "江苏"  # 无后缀原样返回
+    assert region_stem("市") == "市"  # 只剩后缀本身不剥（防空串）
