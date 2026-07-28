@@ -48,13 +48,24 @@ export const PIPELINE_STATUS_LABELS: Record<string, string> = {
   failed: '失败',
 };
 
-/** ISO 时间 → 'YYYY-MM-DD HH:mm'（空值显示 -） */
+/** ISO 时间 → 'YYYY-MM-DD HH:mm'，固定按北京时间（东八区）渲染（空值显示 -）。
+ * 招投标业务时间基准是北京时间，不随浏览器所在时区漂移。 */
+const CST_FMT = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '-';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  // zh-CN 输出形如 '2026/07/29 05:18' → 统一为 '2026-07-29 05:18'
+  return CST_FMT.format(d).replace(/\//g, '-');
 }
 
 export function pipelineStatusLabel(key: string): string {

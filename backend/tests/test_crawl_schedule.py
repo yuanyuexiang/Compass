@@ -36,3 +36,20 @@ def test_schedule_input_bounds():
     with pytest.raises(ValueError):
         ScheduleIn(interval_minutes=721)
     assert ScheduleIn(interval_minutes=30).interval_minutes == 30
+
+
+def test_ensure_cst():
+    """采集解析出的 naive 北京时间入库前补东八区；已带时区/空值原样返回。"""
+    from datetime import datetime, timedelta
+
+    from app.crawler.base import CST, ensure_cst
+
+    naive = datetime(2026, 7, 28, 21, 18)
+    aware = ensure_cst(naive)
+    assert aware.tzinfo == CST
+    # 北京 21:18 == UTC 13:18
+    assert aware.astimezone(UTC).hour == 13
+    already = datetime(2026, 7, 28, 13, 18, tzinfo=UTC)
+    assert ensure_cst(already) is already
+    assert ensure_cst(None) is None
+    assert CST.utcoffset(None) == timedelta(hours=8)

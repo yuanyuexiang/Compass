@@ -14,7 +14,7 @@ from app.ai import embeddings
 from app.ai.extract import build_input, extract_project
 from app.core import storage
 from app.core.db import session_scope
-from app.crawler.base import SourceAdapter, get_adapter, url_fingerprint
+from app.crawler.base import SourceAdapter, ensure_cst, get_adapter, url_fingerprint
 from app.matching.engine import run_match
 from app.matching.profiles import tenant_watches_source
 from app.models import (
@@ -58,7 +58,7 @@ def run_crawl_source(session: Session, source: Source, limit: int | None = None)
                 biddable=is_biddable(raw.ann_type, raw.title),
                 region=raw.region,
                 buyer=raw.buyer,
-                publish_time=raw.publish_time,
+                publish_time=ensure_cst(raw.publish_time),
                 status=AnnouncementStatus.CRAWLED.value,
             )
             session.add(ann)

@@ -10,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
@@ -19,6 +19,20 @@ from bs4 import BeautifulSoup
 from app.core.config import settings
 
 ATTACHMENT_EXTENSIONS = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar")
+
+# 采集源均为国内官方平台，页面时间是北京时间（东八区）
+CST = timezone(timedelta(hours=8))
+
+
+def ensure_cst(dt: datetime | None) -> datetime | None:
+    """无时区的解析结果补上东八区；已带时区或空值原样返回。
+
+    历史缺陷：适配器 strptime 出的 naive 时间入 timestamptz 列被当成 UTC，展示整体 +8 小时。
+    入库前统一经此归一（存量修正见 scripts/fix_publish_tz.py）。
+    """
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=CST)
 
 
 @dataclass(slots=True)
