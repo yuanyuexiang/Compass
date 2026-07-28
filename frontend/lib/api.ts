@@ -68,7 +68,18 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     try {
       const data = (await res.json()) as { detail?: unknown; message?: unknown };
       if (typeof data.detail === 'string' && data.detail) msg = data.detail;
-      else if (typeof data.message === 'string' && data.message) msg = data.message;
+      else if (Array.isArray(data.detail)) {
+        // FastAPI 参数校验错误：detail 是 [{loc, msg}] 数组，拼成可读中文提示
+        const parts = (data.detail as { loc?: unknown[]; msg?: unknown }[])
+          .map((d) => {
+            const loc = Array.isArray(d.loc)
+              ? d.loc.filter((x) => x !== 'body' && x !== 'query').join('.')
+              : '';
+            return loc ? `${loc}：${String(d.msg ?? '')}` : String(d.msg ?? '');
+          })
+          .filter(Boolean);
+        if (parts.length) msg = `参数校验失败——${parts.join('；')}`;
+      } else if (typeof data.message === 'string' && data.message) msg = data.message;
     } catch {
       // 忽略响应体解析失败
     }

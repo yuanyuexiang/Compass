@@ -499,7 +499,8 @@ class SourceIn(BaseModel):
     display_name: str = Field(default="", max_length=128)
     adapter: str
     enabled: bool = True
-    min_interval_seconds: float = Field(default=3.0, ge=1.0, le=60.0)
+    # 前端 InputNumber 清空会提交 null：宽容为默认 3 秒，不整单拒绝
+    min_interval_seconds: float | None = Field(default=3.0, ge=1.0, le=60.0)
     config: dict = {}
 
 
@@ -530,7 +531,7 @@ def create_source(body: SourceIn, current: CurrentUser = PlatformAdminDep) -> di
             display_name=body.display_name or body.name,
             adapter=body.adapter,
             enabled=body.enabled,
-            min_interval_seconds=body.min_interval_seconds,
+            min_interval_seconds=body.min_interval_seconds or 3.0,
             config=body.config,
             cron="0 * * * *",
         )

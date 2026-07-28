@@ -592,14 +592,14 @@ export default function SourcesPage() {
             label="中文名称"
             rules={[{ required: true, message: '请输入中文名称' }]}
           >
-            <Input placeholder="如 江苏公共资源·政府采购公告" />
+            <Input placeholder="如 江苏公共资源·政府采购公告" maxLength={128} />
           </Form.Item>
           <Form.Item
             name="name"
             label="标识（唯一，用于日志与排查）"
             rules={[{ required: true, message: '请输入标识' }]}
           >
-            <Input placeholder="如 jsggzy-zfcg" disabled={!!editing} />
+            <Input placeholder="如 jsggzy-zfcg" disabled={!!editing} maxLength={64} showCount />
           </Form.Item>
 
           {/* 智能识别：新增数据源时的主流程——贴网址，AI 自动判定平台与采集方式 */}
@@ -701,7 +701,11 @@ export default function SourcesPage() {
               disabled={!!editing}
             />
           </Form.Item>
-          <Form.Item name="min_interval_seconds" label="采集限速（每次请求最小间隔，秒）">
+          <Form.Item
+            name="min_interval_seconds"
+            label="采集限速（每次请求最小间隔，秒）"
+            rules={[{ required: true, message: '请填写限速（1–60 秒）' }]}
+          >
             <InputNumber min={1} max={60} style={{ width: 160 }} />
           </Form.Item>
 

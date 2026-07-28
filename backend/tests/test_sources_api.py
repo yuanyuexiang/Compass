@@ -28,3 +28,9 @@ def test_source_in_validates_interval():
         SourceIn(name="x", adapter="ccgp", min_interval_seconds=0.1)  # 低于 1 秒下限
     s = SourceIn(name="x", adapter="ccgp")
     assert s.min_interval_seconds == 3.0 and s.enabled is True
+
+
+def test_source_in_tolerates_null_interval():
+    """前端 InputNumber 清空提交 null：不应整单 422，落库时回落默认 3 秒。"""
+    s = SourceIn(name="x", adapter="ccgp", min_interval_seconds=None)
+    assert (s.min_interval_seconds or 3.0) == 3.0
