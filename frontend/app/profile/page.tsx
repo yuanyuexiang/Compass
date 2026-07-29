@@ -133,7 +133,9 @@ export default function ProfilePage() {
         method: 'POST',
         body: JSON.stringify({ name }),
       });
-      form.setFieldsValue(normalizeProfile(r.draft));
+      // name 为注册企业名（只读权威字段），不接受 AI 草稿覆盖
+      const { name: _draftName, ...draft } = r.draft;
+      form.setFieldsValue(normalizeProfile(draft));
       setSuggestMeta({ sources: r.sources, confidence: r.confidence, note: r.note });
       message.success('已生成画像草稿，请核对补充后保存');
     } catch (e) {
@@ -147,6 +149,8 @@ export default function ProfilePage() {
     apiFetch<ProfileData>('/api/profile')
       .then((data) => {
         form.setFieldsValue(normalizeProfile(data));
+        // AI 生成画像默认按注册企业名联网检索（可改，比如想按品牌名搜）
+        setAiName((prev) => prev || data.name || '');
         setError(null);
       })
       .catch((e: Error) => setError(e.message))
@@ -259,8 +263,12 @@ export default function ProfilePage() {
             <Card className="compass-card" title="基本信息">
               <Row gutter={24}>
                 <Col xs={24} md={12}>
-                  <Form.Item name="name" label="企业名称" rules={[{ required: true, message: '请输入企业名称' }]}>
-                    <Input placeholder="企业全称" />
+                  <Form.Item
+                    name="name"
+                    label="企业名称"
+                    extra="即注册申请时的企业名称，全平台统一展示；如需变更请联系平台管理员"
+                  >
+                    <Input disabled />
                   </Form.Item>
                 </Col>
               </Row>

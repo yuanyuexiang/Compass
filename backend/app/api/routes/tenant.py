@@ -33,6 +33,7 @@ from app.models import (
     Notification,
     Project,
     Subscription,
+    Tenant,
 )
 
 router = APIRouter(prefix="/api")
@@ -111,13 +112,17 @@ def get_profile(current: CurrentUser = CurrentUserDep) -> dict:
         profile = session.scalar(
             select(CompanyProfile).where(CompanyProfile.tenant_id == current.tenant_id)
         )
-        return EMPTY_PROFILE | (profile.data if profile else {})
+        tenant = session.get(Tenant, current.tenant_id)
+        # 企业名称以注册租户名为唯一权威（审批过的账号身份），画像内不可另起名字
+        return EMPTY_PROFILE | (profile.data if profile else {}) | {"name": tenant.name}
 
 
 @router.put("/profile")
 def put_profile(body: dict, current: CurrentUser = CurrentUserDep) -> dict:
     data = {k: body.get(k, v) for k, v in EMPTY_PROFILE.items()}
     with session_scope() as session:
+        # 强制覆盖为注册企业名：保证右上角、画像、匹配 Prompt、AI 检索口径一致
+        data["name"] = session.get(Tenant, current.tenant_id).name
         upsert_profile(session, current.tenant_id, data)
         return {"ok": True}
 
