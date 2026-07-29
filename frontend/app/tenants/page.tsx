@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, App, Button, Card, Popconfirm, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { CheckOutlined, StopOutlined } from '@ant-design/icons';
+import { CheckOutlined, DeleteOutlined, StopOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
 import { formatDateTime } from '@/lib/labels';
@@ -53,6 +53,16 @@ export default function TenantsPage() {
     try {
       await apiFetch(`/api/admin/tenants/${id}/${action}`, { method: 'POST' });
       message.success(`${label}成功`);
+      load();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const doDelete = async (rec: TenantAdminItem) => {
+    try {
+      await apiFetch(`/api/admin/tenants/${rec.id}`, { method: 'DELETE' });
+      message.success(`「${rec.name}」已删除（用量账单保留）`);
       load();
     } catch (e) {
       message.error((e as Error).message);
@@ -134,6 +144,17 @@ export default function TenantsPage() {
               <Button size="small" danger icon={<StopOutlined />}>
                 停用
               </Button>
+            </Popconfirm>
+          ) : null}
+          {rec.status !== 'active' && !rec.is_self ? (
+            <Popconfirm
+              title={`彻底删除「${rec.name}」？`}
+              description="将删除该企业的账号、画像、推荐与通知数据，不可恢复（LLM 用量账单保留）"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => doDelete(rec)}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} />
             </Popconfirm>
           ) : null}
         </Space>

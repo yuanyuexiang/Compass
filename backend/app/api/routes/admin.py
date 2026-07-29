@@ -84,6 +84,50 @@ def disable_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> d
     return _set_tenant_state(tenant_id, current, status="disabled", enabled=False)
 
 
+@router.delete("/tenants/{tenant_id}")
+def delete_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
+    """物理删除租户（仅待审批/已停用可删；正常运营的须先停用——防误删的双闸门）。
+
+    级联清理租户层数据；llm_usage 保留作计费底账（报表显示「已删除租户」）；
+    该租户申请的待审/驳回源一并删除，已生效的源保留（全局共享资产）、仅解除归属。"""
+    from sqlalchemy import delete as sa_delete
+
+    from app.models import (
+        MatchResult,
+        Notification,
+        ProfileChunk,
+        Source,
+        SourceStatus,
+        Subscription,
+    )
+
+    if tenant_id == current.tenant_id:
+        raise HTTPException(status_code=422, detail="不能删除自己所在的租户")
+    with session_scope() as session:
+        tenant = session.get(Tenant, tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=404, detail="租户不存在")
+        if tenant.status == "active":
+            raise HTTPException(status_code=422, detail="正常运营的租户请先停用，再执行删除")
+        name = tenant.name
+        for model in (Notification, MatchResult, ProfileChunk, Subscription, CompanyProfile, User):
+            session.execute(sa_delete(model).where(model.tenant_id == tenant_id))
+        session.execute(
+            sa_delete(Source).where(
+                Source.created_by_tenant_id == tenant_id,
+                Source.status != SourceStatus.ACTIVE.value,
+            )
+        )
+        session.execute(
+            Source.__table__.update()
+            .where(Source.created_by_tenant_id == tenant_id)
+            .values(created_by_tenant_id=None)
+        )
+        session.delete(tenant)
+    clear_block_cache()
+    return {"ok": True, "deleted": name}
+
+
 PENDING_STATUSES = ("crawled", "cleaned", "attachments_parsed", "ai_extracted", "embedded")
 
 
@@ -188,7 +232,9 @@ def usage_report(days: int = 30, current: CurrentUser = PlatformAdminDep) -> dic
         "items": [
             {
                 "tenant_id": tid,
-                "tenant_name": names.get(tid, "（公共层）") if tid is not None else "（公共层）",
+                "tenant_name": (
+                    "（公共层）" if tid is None else names.get(tid, f"（已删除租户 #{tid}）")
+                ),
                 "scene": scene,
                 "calls": calls,
                 "total_tokens": int(tokens),
