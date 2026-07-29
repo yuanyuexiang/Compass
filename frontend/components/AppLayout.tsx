@@ -215,7 +215,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
               alignItems: 'center',
               justifyContent: collapsed ? 'center' : 'flex-start',
               gap: 12,
-              padding: collapsed ? '20px 0 16px' : '20px 20px 16px',
+              padding: collapsed ? '20px 0 16px' : '20px 24px 16px',
             }}
           >
             <CompassOutlined style={{ fontSize: 30, color: '#FAAD14' }} />

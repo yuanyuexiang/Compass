@@ -56,6 +56,15 @@ a {
   line-height: 44px;
 }
 
+/* 展开态统一左对齐基线 24px：菜单项外边距 8 + 内边距 16 → 图标左缘 24，
+   与品牌 logo、分组标题、底部头像同一条线（antd 分组子项的层级缩进一并覆盖） */
+.compass-sider .ant-menu-inline .ant-menu-item {
+  margin-inline: 8px;
+  width: calc(100% - 16px);
+  padding-left: 16px !important;
+  border-radius: 8px;
+}
+
 .compass-sider .ant-menu-item .anticon {
   font-size: 16px;
 }
@@ -64,28 +73,33 @@ a {
   background: rgba(255, 255, 255, 0.05) !important;
 }
 
-/* 菜单分组标题（工作区/管理）：弱化的小号大写风格 */
+/* 菜单分组标题（工作区/管理）：弱化的小号风格，文字左缘对齐 24px 基线 */
 .compass-sider .ant-menu-item-group-title {
   color: rgba(255, 255, 255, 0.35) !important;
   font-size: 11px;
   letter-spacing: 2px;
-  padding: 14px 24px 6px;
+  padding: 14px 24px 6px !important;
 }
 
 .compass-sider .ant-menu-inline-collapsed .ant-menu-item-group-title {
   display: none;
 }
 
-/* 底部用户卡片 */
+/* 底部用户卡片：margin 12 + padding 12 → 头像左缘对齐 24px 基线；折叠态改为居中 */
 .sider-footer {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 10px;
-  margin: 8px 10px 12px;
+  margin: 8px 12px 12px;
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.06);
+}
+
+.ant-layout-sider-collapsed .sider-footer {
+  justify-content: center;
+  padding-inline: 0;
 }
 
 .sider-footer-name {
