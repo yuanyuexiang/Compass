@@ -38,3 +38,25 @@ def test_suggest_list_selectors_filters_empty(monkeypatch):
     assert result["item_selector"] == "ul.news-list li"
     assert result["link_selector"] == "a"
     assert "date_selector" not in result  # 空串被过滤，不写入 config
+
+
+def test_friendly_llm_error():
+    """LLM 供应商异常翻译成中文提示；非 LLM 异常返回 None 由调用方自理。"""
+    import litellm
+
+    from app.ai.llm_config import friendly_llm_error
+
+    balance = litellm.BadRequestError(
+        message='DeepseekException - {"error":{"message":"Insufficient Balance"}}',
+        model="deepseek-v4-flash", llm_provider="deepseek",
+    )
+    assert "余额不足" in friendly_llm_error(balance)
+    auth = litellm.AuthenticationError(
+        message="invalid api key", model="deepseek-v4-flash", llm_provider="deepseek"
+    )
+    assert "密钥无效" in friendly_llm_error(auth)
+    other = litellm.BadRequestError(
+        message="something odd", model="deepseek-v4-flash", llm_provider="deepseek"
+    )
+    assert "AI 服务暂时不可用" in friendly_llm_error(other)
+    assert friendly_llm_error(ValueError("网站超时")) is None

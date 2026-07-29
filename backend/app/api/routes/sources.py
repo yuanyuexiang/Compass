@@ -2,18 +2,21 @@
 
 租户侧仅暴露 /sources/options 只读源名列表，供订阅设置页勾选「关注的数据源」。"""
 
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 
+from app.ai.llm_config import friendly_llm_error
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep, PlatformAdminDep
 from app.crawler.base import ADAPTERS
 from app.models import Announcement, Source, SourceStatus, Subscription, Tenant
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 
 def _adapters() -> dict[str, str]:
@@ -285,10 +288,16 @@ def smart_suggest(body: SmartSuggestIn, current: CurrentUser = PlatformAdminDep)
     from urllib.parse import urlparse
 
     host = (urlparse(body.url).hostname or "").lower()
-    for domain, adapter_name in DOMAIN_ADAPTERS.items():
-        if host == domain or host.endswith("." + domain):
-            return _smart_known(adapter_name, body.url)
-    return _smart_generic(body.url)
+    try:
+        for domain, adapter_name in DOMAIN_ADAPTERS.items():
+            if host == domain or host.endswith("." + domain):
+                return _smart_known(adapter_name, body.url)
+        return _smart_generic(body.url)
+    except Exception as exc:  # LLM 欠费/限流等对用户给中文提示，原始异常记日志
+        logger.exception("智能识别失败 url=%s", body.url)
+        return {"ok": False, "adapter": None, "adapter_display_name": None,
+                "config": None, "items": [], "detail_preview": None, "notes": None,
+                "error": (friendly_llm_error(exc) or str(exc))[:400]}
 
 
 def _smart_known(adapter_name: str, url: str) -> dict:
@@ -455,7 +464,7 @@ def suggest_source(body: SuggestIn, current: CurrentUser = PlatformAdminDep) -> 
         }
     except Exception as exc:
         return {"ok": False, "config": None, "items": [], "detail_preview": None,
-                "error": str(exc)[:500]}
+                "error": (friendly_llm_error(exc) or str(exc))[:500]}
     finally:
         adapter.close()
 

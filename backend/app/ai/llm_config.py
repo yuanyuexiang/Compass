@@ -37,6 +37,26 @@ def _record_usage(scene: str, tenant_id: int | None, response) -> None:
         logger.warning("LLM 用量落库失败（scene=%s）", scene, exc_info=True)
 
 
+def friendly_llm_error(exc: Exception) -> str | None:
+    """LLM 供应商异常 → 用户可读的中文提示；非 LLM 异常返回 None（调用方自行处理）。
+
+    历史教训：DeepSeek 欠费时原始报错 `litellm.BadRequestError: ... Insufficient Balance`
+    直接透给了终端用户。用户界面只该出现可行动的中文提示，原始异常记日志。
+    """
+    if not type(exc).__module__.startswith("litellm"):
+        return None
+    text = str(exc)
+    if "Insufficient Balance" in text or "insufficient_quota" in text:
+        return "AI 服务余额不足，请联系平台管理员为 DeepSeek 账户充值"
+    if "rate" in text.lower() and "limit" in text.lower():
+        return "AI 服务繁忙（限流），请稍后重试"
+    if "api key" in text.lower() or type(exc).__name__ == "AuthenticationError":
+        return "AI 服务密钥无效，请联系平台管理员检查配置"
+    if "timeout" in text.lower():
+        return "AI 服务响应超时，请稍后重试"
+    return "AI 服务暂时不可用，请稍后重试"
+
+
 def extract_completion(
     messages: list[dict], scene: str = "unknown", tenant_id: int | None = None, **kwargs
 ):

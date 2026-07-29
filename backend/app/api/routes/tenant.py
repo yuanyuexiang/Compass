@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.ai import websearch
+from app.ai.llm_config import friendly_llm_error
 from app.ai.nl_search import parse_query
 from app.ai.profile_suggest import suggest_profile
 from app.core.db import session_scope
@@ -151,7 +152,9 @@ def profile_suggest(body: ProfileSuggestIn, current: CurrentUser = CurrentUserDe
         return suggest_profile(name, tenant_id=current.tenant_id)
     except Exception as exc:
         logger.exception("AI 画像生成失败")
-        raise HTTPException(status_code=502, detail=f"生成画像失败：{exc}") from exc
+        raise HTTPException(
+            status_code=502, detail=f"生成画像失败：{friendly_llm_error(exc) or exc}"
+        ) from exc
 
 
 DEFAULT_CHANNELS = {
