@@ -32,6 +32,8 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
+    ports:
+      - "5432:5432" # 仅测试
 
   redis:
     image: redis:7-alpine
