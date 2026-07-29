@@ -55,7 +55,11 @@ export default function MembersPage() {
     try {
       await apiFetch('/api/tenant/users', {
         method: 'POST',
-        body: JSON.stringify({ ...values, email: values.email || null }),
+        body: JSON.stringify({
+          ...values,
+          username: values.username.trim(),
+          email: values.email || null,
+        }),
       });
       message.success('成员已添加');
       setCreateOpen(false);

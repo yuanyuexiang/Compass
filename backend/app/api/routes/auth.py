@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from app.core.db import session_scope
@@ -17,9 +17,26 @@ from app.models import Subscription, Tenant, User
 router = APIRouter(prefix="/api")
 
 
+def clean_username(v: str) -> str:
+    """去首尾空白（含全角空格）；中间含空白直接拒绝。
+
+    历史教训：注册时用户名带尾部空格（如「Johnson 」）入库，之后用「Johnson」永远登录失败。
+    注册/建成员/登录三处统一经此清洗，登录侧顺带容忍用户误输的首尾空格。
+    """
+    v = v.strip()
+    if any(ch.isspace() for ch in v):
+        raise ValueError("用户名不能包含空格")
+    return v
+
+
 class LoginIn(BaseModel):
     username: str
     password: str
+
+    @field_validator("username")
+    @classmethod
+    def _clean(cls, v: str) -> str:
+        return v.strip()  # 登录只去首尾空白，不因中间空格报错（报错文案会泄露规则）
 
 
 class RegisterIn(BaseModel):
@@ -27,6 +44,16 @@ class RegisterIn(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str
     email: str | None = Field(default=None, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def _clean_username(cls, v: str) -> str:
+        return clean_username(v)
+
+    @field_validator("tenant_name")
+    @classmethod
+    def _clean_tenant(cls, v: str) -> str:
+        return v.strip()
 
 
 def _user_info(user: User, tenant_name: str) -> dict:

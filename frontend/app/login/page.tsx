@@ -27,7 +27,8 @@ export default function LoginPage() {
     try {
       const res = await apiFetch<LoginResponse>('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify(values),
+        // 用户名常见误输首尾空格（历史上因此登录失败过），提交前统一清理
+        body: JSON.stringify({ ...values, username: values.username.trim() }),
       });
       setSession(res.access_token, res.user);
       message.success('登录成功');

@@ -25,8 +25,8 @@ export default function RegisterPage() {
       await apiFetch('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({
-          tenant_name: values.tenant_name,
-          username: values.username,
+          tenant_name: values.tenant_name.trim(),
+          username: values.username.trim(),
           password: values.password,
           email: values.email || null,
         }),

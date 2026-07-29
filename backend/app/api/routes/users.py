@@ -1,9 +1,10 @@
 """租户内成员管理：tenant_admin 管理本租户账号。跨租户一律 404，防探测。"""
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
+from app.api.routes.auth import clean_username
 from app.core.db import session_scope
 from app.core.security import (
     AdminDep,
@@ -25,6 +26,11 @@ class UserCreateIn(BaseModel):
     password: str
     email: str | None = Field(default=None, max_length=128)
     role: str = "sales"
+
+    @field_validator("username")
+    @classmethod
+    def _clean_username(cls, v: str) -> str:
+        return clean_username(v)
 
 
 class UserPatchIn(BaseModel):

@@ -46,3 +46,21 @@ def test_missing_or_bad_token_rejected():
         get_current_user(FakeRequest(None))
     with pytest.raises(HTTPException):
         get_current_user(FakeRequest("not-a-jwt"))
+
+
+def test_clean_username():
+    """用户名清洗：去首尾空白（含全角空格），中间空格拒绝（Johnson 尾空格事故复盘）。"""
+    import pytest
+
+    from app.api.routes.auth import LoginIn, RegisterIn, clean_username
+
+    assert clean_username("Johnson ") == "Johnson"
+    assert clean_username("　Johnson　") == "Johnson"  # 全角空格
+    assert clean_username("Johnson") == "Johnson"
+    with pytest.raises(ValueError):
+        clean_username("John son")
+
+    assert RegisterIn(
+        tenant_name=" 某公司 ", username=" Johnson ", password="Abcd1234"
+    ).username == "Johnson"
+    assert LoginIn(username=" Johnson ", password="x").username == "Johnson"
