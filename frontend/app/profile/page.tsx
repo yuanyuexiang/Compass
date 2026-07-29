@@ -11,6 +11,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Progress,
   Row,
   Select,
   Skeleton,
@@ -96,6 +97,26 @@ function splitTags(list?: string[]): string[] {
     }
   }
   return out;
+}
+
+/** 画像完成度：9 个内容项的填写比例 + 缺项清单（画像越完整，AI 匹配越准） */
+function profileCompleteness(d: ProfileData): { percent: number; missing: string[] } {
+  const checks: [string, boolean][] = [
+    ['企业简介', !!d.description],
+    ['主要产品', !!d.products?.length],
+    ['主要服务', !!d.services?.length],
+    ['覆盖行业', !!d.industries?.length],
+    ['业务区域', !!d.regions?.length],
+    ['资质证书', !!d.certifications?.length],
+    ['代理品牌', !!d.brands?.length],
+    ['典型案例', !!d.cases_text],
+    ['推荐过滤', !!d.filter?.regions?.length || d.filter?.min_budget != null],
+  ];
+  const done = checks.filter(([, ok]) => ok).length;
+  return {
+    percent: Math.round((done / checks.length) * 100),
+    missing: checks.filter(([, ok]) => !ok).map(([label]) => label),
+  };
 }
 
 function isProfileEmpty(d: ProfileData): boolean {
@@ -323,6 +344,24 @@ export default function ProfilePage() {
             <Typography.Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
               {profileData.description || <Typography.Text type="secondary">未填写企业简介</Typography.Text>}
             </Typography.Paragraph>
+            {(() => {
+              const { percent, missing } = profileCompleteness(profileData);
+              return percent < 100 ? (
+                <div style={{ marginTop: 14, maxWidth: 520 }}>
+                  <Space size={10} align="center" style={{ width: '100%' }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+                      画像完成度
+                    </Typography.Text>
+                    <div style={{ width: 180 }}>
+                      <Progress percent={percent} size="small" />
+                    </div>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      还差：{missing.join('、')}——越完整，AI 匹配越准
+                    </Typography.Text>
+                  </Space>
+                </div>
+              ) : null;
+            })()}
           </Card>
 
           <Card className="compass-card" title="能力标签">

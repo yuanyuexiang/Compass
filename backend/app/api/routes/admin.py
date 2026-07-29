@@ -6,8 +6,15 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, select
 
 from app.core.db import session_scope
+from app.core.kv import (
+    DEFAULT_CRAWL_INTERVAL_MINUTES,
+    KEY_CRAWL_INTERVAL,
+    KEY_LAST_AUTO_CRAWL,
+    get_setting,
+)
+from app.core.ratelimit import counter_get, note_get
 from app.core.security import CurrentUser, PlatformAdminDep, clear_block_cache
-from app.models import CompanyProfile, LlmUsage, Tenant, User
+from app.models import Announcement, CompanyProfile, LlmUsage, Source, SourceStatus, Tenant, User
 
 router = APIRouter(prefix="/api/admin")
 
@@ -75,6 +82,89 @@ def enable_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> di
 @router.post("/tenants/{tenant_id}/disable")
 def disable_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
     return _set_tenant_state(tenant_id, current, status="disabled", enabled=False)
+
+
+PENDING_STATUSES = ("crawled", "cleaned", "attachments_parsed", "ai_extracted", "embedded")
+
+
+@router.get("/health")
+def system_health(current: CurrentUser = PlatformAdminDep) -> dict:
+    """系统健康总览：流水线积压、24h 吞吐、LLM 状态、采集源与调度活性。
+
+    历史教训：DeepSeek 欠费是客户先发现的——平台方必须先于用户看到异常。"""
+    now = datetime.now(UTC)
+    day_ago = now - timedelta(hours=24)
+    with session_scope() as session:
+        by_status = dict(
+            session.execute(
+                select(Announcement.status, func.count()).group_by(Announcement.status)
+            ).all()
+        )
+        backlog = {s: by_status.get(s, 0) for s in PENDING_STATUSES if by_status.get(s)}
+        crawled_24h = session.scalar(
+            select(func.count()).select_from(Announcement).where(Announcement.created_at >= day_ago)
+        )
+        published_24h = session.scalar(
+            select(func.count()).select_from(Announcement).where(
+                Announcement.status == "published", Announcement.updated_at >= day_ago
+            )
+        )
+        failed_24h = session.scalar(
+            select(func.count()).select_from(Announcement).where(
+                Announcement.status == "failed", Announcement.updated_at >= day_ago
+            )
+        )
+        llm_last_success = session.scalar(select(func.max(LlmUsage.created_at)))
+
+        # 采集源活性：active+enabled 且开采超过 48h 但 48h 内无新公告 → 视为可疑停滞
+        two_days_ago = now - timedelta(hours=48)
+        recent_by_source = dict(
+            session.execute(
+                select(Announcement.source_id, func.count())
+                .where(Announcement.created_at >= two_days_ago)
+                .group_by(Announcement.source_id)
+            ).all()
+        )
+        stale_sources = [
+            {"id": s.id, "name": s.display_name or s.name,
+             "last_run_at": s.last_run_at.isoformat() if s.last_run_at else None}
+            for s in session.scalars(
+                select(Source).where(
+                    Source.enabled, Source.status == SourceStatus.ACTIVE.value
+                )
+            ).all()
+            if not recent_by_source.get(s.id)
+            and (s.created_at is None or s.created_at < two_days_ago)
+        ]
+
+        interval = int(get_setting(session, KEY_CRAWL_INTERVAL, DEFAULT_CRAWL_INTERVAL_MINUTES))
+        last_auto = get_setting(session, KEY_LAST_AUTO_CRAWL)
+
+    beat_ok = True
+    if last_auto:
+        gap = (now - datetime.fromisoformat(last_auto)).total_seconds() / 60
+        beat_ok = gap < max(interval * 3, 10)
+
+    llm_failures = counter_get("llm_failures")
+    return {
+        "backlog": backlog,
+        "failed_total": by_status.get("failed", 0),
+        "last_24h": {
+            "crawled": crawled_24h, "published": published_24h, "failed": failed_24h,
+        },
+        "llm": {
+            "consecutive_failures": llm_failures,
+            "ok": llm_failures < 3,
+            "last_error": note_get("llm_last_error"),
+            "last_success_at": llm_last_success.isoformat() if llm_last_success else None,
+        },
+        "scheduler": {
+            "ok": beat_ok,
+            "last_auto_crawl_at": last_auto,
+            "interval_minutes": interval,
+        },
+        "stale_sources": stale_sources,
+    }
 
 
 @router.get("/usage")

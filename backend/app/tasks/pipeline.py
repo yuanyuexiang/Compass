@@ -7,7 +7,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai import embeddings
@@ -294,6 +294,93 @@ def rematch_tenant_task(tenant_id: int) -> None:
         "画像重评估完成 tenant=%s 窗口=%d天 候选=%d 产出/更新=%d",
         tenant_id, REMATCH_WINDOW_DAYS, len(project_ids), done,
     )
+
+
+SWEEP_STUCK_AFTER = timedelta(hours=1)
+SWEEP_FAILED_AFTER = timedelta(hours=6)
+SWEEP_FAILED_GIVEUP = timedelta(days=7)
+
+
+@celery.task(name="app.tasks.pipeline.pipeline_sweep")
+def pipeline_sweep_task() -> None:
+    """流水线自动补偿（每小时）：把卡住的公告按其所处阶段重新派发。
+
+    覆盖两类：①中间状态停滞超 1 小时（worker 重启/任务丢失）；②failed 超 6 小时重试
+    （LLM 欠费恢复后自动消化积压），失败超 7 天放弃避免永久坏数据空转。"""
+    now = datetime.now(UTC)
+    dispatch: list[tuple[str, int]] = []
+    with session_scope() as session:
+        stuck = session.scalars(
+            select(Announcement)
+            .where(
+                Announcement.status.in_(
+                    ("crawled", "cleaned", "attachments_parsed", "ai_extracted", "embedded")
+                ),
+                Announcement.updated_at < now - SWEEP_STUCK_AFTER,
+            )
+            .order_by(Announcement.updated_at)
+            .limit(50)
+        ).all()
+        failed = session.scalars(
+            select(Announcement)
+            .where(
+                Announcement.status == AnnouncementStatus.FAILED.value,
+                Announcement.updated_at < now - SWEEP_FAILED_AFTER,
+                Announcement.updated_at > now - SWEEP_FAILED_GIVEUP,
+            )
+            .order_by(Announcement.updated_at)
+            .limit(20)
+        ).all()
+        for ann in stuck + failed:
+            if ann.status == "crawled" or (ann.status == "failed" and not ann.clean_text):
+                dispatch.append(("clean", ann.id))
+            elif ann.status in ("cleaned", "attachments_parsed") or ann.status == "failed":
+                dispatch.append(("extract", ann.id))
+            else:  # ai_extracted / embedded：只差发布
+                dispatch.append(("publish", ann.id))
+    tasks = {"clean": fetch_and_clean_task, "extract": ai_extract_task, "publish": publish_task}
+    for kind, ann_id in dispatch:
+        tasks[kind].delay(ann_id)
+    if dispatch:
+        logger.info("流水线补偿：重派 %d 条（%s）", len(dispatch),
+                    {k: sum(1 for x, _ in dispatch if x == k) for k in {x for x, _ in dispatch}})
+
+
+@celery.task(name="app.tasks.pipeline.health_alert")
+def health_alert_task() -> None:
+    """健康告警（每 30 分钟）：LLM 连续失败 / 提取积压异常时站内信通知平台管理员，6 小时冷却。"""
+    from app.core.ratelimit import acquire_cooldown, counter_get, note_get
+    from app.models import Notification, User
+
+    problems: list[str] = []
+    failures = counter_get("llm_failures")
+    if failures >= 5:
+        last = note_get("llm_last_error") or ""
+        problems.append(f"LLM 连续失败 {failures} 次（可能欠费或密钥失效）。最近报错：{last}")
+    with session_scope() as session:
+        backlog = session.scalar(
+            select(func.count()).select_from(Announcement).where(
+                Announcement.status.in_(("cleaned", "attachments_parsed")),
+                Announcement.updated_at < datetime.now(UTC) - timedelta(hours=2),
+            )
+        )
+        if backlog and backlog > 100:
+            problems.append(f"待 AI 提取积压 {backlog} 条已超 2 小时，请检查 worker 与 LLM 状态")
+        if not problems:
+            return
+        if not acquire_cooldown("health_alert", 6 * 3600):
+            return
+        admin_tenants = set(
+            session.scalars(select(User.tenant_id).where(User.role == "platform_admin")).all()
+        )
+        for tid in admin_tenants:
+            session.add(
+                Notification(
+                    tenant_id=tid, channel="web", title="【系统告警】流水线异常",
+                    body="；\n".join(problems),
+                )
+            )
+    logger.warning("系统健康告警已发送：%s", problems)
 
 
 @celery.task(name="app.tasks.pipeline.daily_digest")

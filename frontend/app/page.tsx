@@ -36,6 +36,21 @@ import { apiFetch } from '@/lib/api';
 import { FOLLOW_STATUSES, RISK_KEYS, RISK_LABELS, formatBudget, pipelineStatusLabel } from '@/lib/labels';
 import type { Advice, FollowStatus, Recommendation, Stats } from '@/lib/types';
 
+/** 系统健康（GET /api/admin/health，仅平台管理员） */
+interface HealthData {
+  backlog: Record<string, number>;
+  failed_total: number;
+  last_24h: { crawled: number; published: number; failed: number };
+  llm: {
+    consecutive_failures: number;
+    ok: boolean;
+    last_error: string | null;
+    last_success_at: string | null;
+  };
+  scheduler: { ok: boolean; last_auto_crawl_at: string | null; interval_minutes: number };
+  stale_sources: { id: number; name: string; last_run_at: string | null }[];
+}
+
 const MIN_STAR_OPTIONS = [
   { value: 0, label: '全部星级' },
   { value: 3, label: '≥ 3 星' },
@@ -347,9 +362,17 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [minStar, setMinStar] = useState(0);
 
+  const [health, setHealth] = useState<HealthData | null>(null);
+
   useEffect(() => {
     apiFetch<Stats>('/api/stats')
-      .then(setStats)
+      .then((s) => {
+        setStats(s);
+        // by_status 仅平台管理员返回 → 同一身份才拉系统健康
+        if (s.by_status) {
+          apiFetch<HealthData>('/api/admin/health').then(setHealth).catch(() => {});
+        }
+      })
       .catch(() => {
         // 统计加载失败时保持空态展示
       });
@@ -437,8 +460,57 @@ export default function DashboardPage() {
       </Row>
 
       {byStatus ? (
-        <Card className="compass-card" title="处理流水线" size="small" style={{ marginBottom: 24 }}>
+        <Card className="compass-card" title="处理流水线" size="small" style={{ marginBottom: 16 }}>
           <PipelineBar byStatus={byStatus} />
+        </Card>
+      ) : null}
+
+      {health ? (
+        <Card className="compass-card" title="系统健康" size="small" style={{ marginBottom: 24 }}>
+          <Space size={[24, 10]} wrap align="center">
+            <Space size={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>AI 服务</Typography.Text>
+              {health.llm.ok ? (
+                <Tag icon={<CheckCircleOutlined />} color="green">正常</Tag>
+              ) : (
+                <Tooltip title={health.llm.last_error ?? ''}>
+                  <Tag icon={<CloseCircleOutlined />} color="red">
+                    连续失败 {health.llm.consecutive_failures} 次
+                  </Tag>
+                </Tooltip>
+              )}
+            </Space>
+            <Space size={6}>
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>采集调度</Typography.Text>
+              {health.scheduler.ok ? (
+                <Tag icon={<CheckCircleOutlined />} color="green">正常</Tag>
+              ) : (
+                <Tag icon={<WarningOutlined />} color="orange">疑似停摆</Tag>
+              )}
+            </Space>
+            <Typography.Text style={{ fontSize: 13 }}>
+              24h：采集 {health.last_24h.crawled} · 发布 {health.last_24h.published} · 失败{' '}
+              {health.last_24h.failed}
+            </Typography.Text>
+            {Object.keys(health.backlog).length ? (
+              <Space size={6} wrap>
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>积压</Typography.Text>
+                {Object.entries(health.backlog).map(([s, n]) => (
+                  <Tag key={s} color="gold">{pipelineStatusLabel(s)} {n}</Tag>
+                ))}
+              </Space>
+            ) : null}
+            {health.failed_total ? (
+              <Tag color="red">累计失败 {health.failed_total}</Tag>
+            ) : null}
+            {health.stale_sources.length ? (
+              <Tooltip title={health.stale_sources.map((s) => s.name).join('、')}>
+                <Tag icon={<WarningOutlined />} color="orange">
+                  {health.stale_sources.length} 个源 48h 无新公告
+                </Tag>
+              </Tooltip>
+            ) : null}
+          </Space>
         </Card>
       ) : null}
 

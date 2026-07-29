@@ -24,4 +24,14 @@ celery.conf.beat_schedule = {
         "task": "app.tasks.pipeline.daily_digest",
         "schedule": crontab(hour=8, minute=30),
     },
+    # 流水线自动补偿：卡住/失败的公告按阶段重派（LLM 欠费恢复后自动消化积压）
+    "pipeline-sweep": {
+        "task": "app.tasks.pipeline.pipeline_sweep",
+        "schedule": crontab(minute=15),  # 每小时 :15
+    },
+    # 系统健康告警：LLM 连败/提取积压 → 站内信通知平台管理员（任务内 6h 冷却去重）
+    "health-alert": {
+        "task": "app.tasks.pipeline.health_alert",
+        "schedule": crontab(minute="*/30"),
+    },
 }

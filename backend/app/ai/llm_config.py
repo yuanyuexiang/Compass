@@ -60,13 +60,29 @@ def friendly_llm_error(exc: Exception) -> str | None:
 def extract_completion(
     messages: list[dict], scene: str = "unknown", tenant_id: int | None = None, **kwargs
 ):
-    """LLM 统一入口：JSON 输出 + 空返回重试由调用方负责。scene/tenant_id 用于用量记账。"""
-    resp = litellm.completion(
-        model=settings.llm_extract_model,
-        api_key=settings.deepseek_api_key,
-        messages=messages,
-        response_format={"type": "json_object"},
-        **kwargs,
-    )
+    """LLM 统一入口：JSON 输出 + 空返回重试由调用方负责。scene/tenant_id 用于用量记账。
+
+    连续失败数与最近报错记入 Redis，供系统健康面板与告警使用（欠费/密钥失效即时可见）。
+    """
+    from datetime import UTC, datetime
+
+    from app.core.ratelimit import counter_incr, counter_reset, note_set
+
+    try:
+        resp = litellm.completion(
+            model=settings.llm_extract_model,
+            api_key=settings.deepseek_api_key,
+            messages=messages,
+            response_format={"type": "json_object"},
+            **kwargs,
+        )
+    except Exception as exc:
+        counter_incr("llm_failures")
+        note_set(
+            "llm_last_error",
+            f"{datetime.now(UTC).strftime('%m-%d %H:%M')} [{scene}] {str(exc)[:180]}",
+        )
+        raise
+    counter_reset("llm_failures")
     _record_usage(scene, tenant_id, resp)
     return resp

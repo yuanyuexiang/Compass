@@ -64,6 +64,46 @@ def acquire_cooldown(key: str, seconds: int) -> bool:
         return True
 
 
+def counter_incr(key: str, ttl: int = 259_200) -> None:
+    """通用递增计数（如 LLM 连续失败数），Redis 不可用时静默跳过。"""
+    try:
+        client = _redis()
+        if client.incr(f"counter:{key}") == 1:
+            client.expire(f"counter:{key}", ttl)
+    except redis.RedisError:
+        pass
+
+
+def counter_reset(key: str) -> None:
+    try:
+        _redis().delete(f"counter:{key}")
+    except redis.RedisError:
+        pass
+
+
+def counter_get(key: str) -> int:
+    try:
+        return int(_redis().get(f"counter:{key}") or 0)
+    except redis.RedisError:
+        return 0
+
+
+def note_set(key: str, value: str, ttl: int = 259_200) -> None:
+    """短便签（如最近一次 LLM 报错摘要），供健康面板展示。"""
+    try:
+        _redis().set(f"note:{key}", value, ex=ttl)
+    except redis.RedisError:
+        pass
+
+
+def note_get(key: str) -> str | None:
+    try:
+        v = _redis().get(f"note:{key}")
+        return v.decode() if v is not None else None
+    except redis.RedisError:
+        return None
+
+
 def quota_key(scene: str, tenant_id: int, now: datetime | None = None) -> str:
     day = (now or datetime.now(_TZ_BEIJING)).astimezone(_TZ_BEIJING).strftime("%Y%m%d")
     return f"quota:{scene}:{tenant_id}:{day}"
