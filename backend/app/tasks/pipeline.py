@@ -260,6 +260,42 @@ def match_project_task(project_id: int, tenant_id: int) -> None:
             dispatch_match(session, match)
 
 
+REMATCH_WINDOW_DAYS = 7
+
+
+@celery.task(name="app.tasks.pipeline.rematch_tenant", max_retries=1, default_retry_delay=120)
+def rematch_tenant_task(tenant_id: int) -> None:
+    """画像变更后的重评估：对近 REMATCH_WINDOW_DAYS 天已发布、可投标、且在该租户
+    关注源范围内的公告按新画像重跑匹配（run_match force：更新评分、保留跟进状态）。
+    不发即时通知（防轰炸），新结果直接进工作台。受每日精排配额封顶。"""
+    from app.matching.profiles import get_watched_source_ids
+
+    since = datetime.now(UTC) - timedelta(days=REMATCH_WINDOW_DAYS)
+    with session_scope() as session:
+        watched = get_watched_source_ids(session, tenant_id)
+        stmt = (
+            select(Project.id)
+            .join(Announcement, Project.announcement_id == Announcement.id)
+            .where(
+                Announcement.status == AnnouncementStatus.PUBLISHED.value,
+                Announcement.biddable.isnot(False),
+                Announcement.publish_time >= since,
+            )
+        )
+        if watched:
+            stmt = stmt.where(Announcement.source_id.in_(watched))
+        project_ids = session.scalars(stmt).all()
+    done = 0
+    for pid in project_ids:
+        with session_scope() as session:
+            if run_match(session, pid, tenant_id, force=True) is not None:
+                done += 1
+    logger.info(
+        "画像重评估完成 tenant=%s 窗口=%d天 候选=%d 产出/更新=%d",
+        tenant_id, REMATCH_WINDOW_DAYS, len(project_ids), done,
+    )
+
+
 @celery.task(name="app.tasks.pipeline.daily_digest")
 def daily_digest_task() -> None:
     with session_scope() as session:

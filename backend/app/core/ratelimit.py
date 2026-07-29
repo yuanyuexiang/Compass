@@ -54,6 +54,16 @@ def clear_login_failures(username: str) -> None:
         pass
 
 
+def acquire_cooldown(key: str, seconds: int) -> bool:
+    """冷却闸：seconds 内首次调用返回 True，期间再调返回 False。
+    Redis 不可用时放行（护栏不做单点）。用于画像重评估等防抖场景。"""
+    try:
+        return bool(_redis().set(f"cooldown:{key}", "1", nx=True, ex=seconds))
+    except redis.RedisError:
+        logger.warning("Redis 不可用，冷却检查跳过（%s）", key)
+        return True
+
+
 def quota_key(scene: str, tenant_id: int, now: datetime | None = None) -> str:
     day = (now or datetime.now(_TZ_BEIJING)).astimezone(_TZ_BEIJING).strftime("%Y%m%d")
     return f"quota:{scene}:{tenant_id}:{day}"

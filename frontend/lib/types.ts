@@ -170,6 +170,8 @@ export interface ProfileData {
     regions: string[];
     min_budget: number | null;
   };
+  /** 当前生效版本的更新时间（只读，后端返回） */
+  updated_at?: string | null;
 }
 
 /** AI 生成画像草稿（POST /api/profile/suggest）：draft 预填表单，不含 filter（经营决策手填） */

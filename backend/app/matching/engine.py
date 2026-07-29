@@ -131,15 +131,26 @@ def llm_rerank(input_text: str, tenant_id: int | None = None) -> MatchScoreCard:
     raise RuntimeError(f"连续 {MAX_ATTEMPTS} 次精排失败: {last_error}")
 
 
-def run_match(session: Session, project_id: int, tenant_id: int) -> MatchResult | None:
-    """对单个项目 × 单个租户执行三级漏斗，返回 MatchResult（被过滤时返回 None）。幂等。"""
+def run_match(
+    session: Session, project_id: int, tenant_id: int, force: bool = False
+) -> MatchResult | None:
+    """对单个项目 × 单个租户执行三级漏斗，返回 MatchResult（被过滤时返回 None）。幂等。
+
+    force=True（画像改动后的重评估）：已有结果按新画像重新打分（保留用户跟进状态）；
+    新规则把它排除时，未跟进过的旧结果删除、已跟进的保留（不夺走用户正在跟的项目）。
+    """
     existing = session.scalar(
         select(MatchResult).where(
             MatchResult.tenant_id == tenant_id, MatchResult.project_id == project_id
         )
     )
-    if existing:
+    if existing and not force:
         return existing
+
+    def drop_stale() -> None:
+        if existing is not None and existing.follow_status == "待看":
+            session.delete(existing)
+            session.flush()
 
     project = session.get(Project, project_id)
     profile = session.scalar(select(CompanyProfile).where(CompanyProfile.tenant_id == tenant_id))
@@ -155,9 +166,11 @@ def run_match(session: Session, project_id: int, tenant_id: int) -> MatchResult 
     passed, reason = rule_filter(project, profile.data or {})
     if not passed:
         logger.info("规则过滤 tenant=%s project=%s: %s", tenant_id, project_id, reason)
+        drop_stale()
         return None
     if not vector_recall(session, project, tenant_id):
         logger.info("向量粗排未召回 tenant=%s project=%s", tenant_id, project_id)
+        drop_stale()
         return None
 
     # 每日精排配额（成本护栏）：超额跳过，公告仍可检索，只是当天不再产生新推荐
@@ -169,6 +182,15 @@ def run_match(session: Session, project_id: int, tenant_id: int) -> MatchResult 
         return None
 
     card = llm_rerank(build_match_input(project, ann, profile), tenant_id)
+    if existing is not None:
+        # 重评估：更新评分与结论，保留 follow_status（用户的跟进标记不可被冲掉）
+        existing.match_score = card.match_score
+        existing.star = card.star
+        existing.advice = card.advice
+        existing.reasons = [r.model_dump() for r in card.reasons]
+        existing.risks = {k: v.model_dump() for k, v in card.risks.items()}
+        session.flush()
+        return existing
     result = MatchResult(
         tenant_id=tenant_id,
         project_id=project_id,

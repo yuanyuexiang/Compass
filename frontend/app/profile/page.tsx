@@ -10,6 +10,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Row,
   Select,
   Skeleton,
@@ -17,9 +18,10 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { RobotOutlined, SaveOutlined } from '@ant-design/icons';
+import { EditOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
+import { formatDateTime } from '@/lib/labels';
 import type { ProfileData, ProfileSuggestResult } from '@/lib/types';
 
 const CONFIDENCE_TAG: Record<string, { color: string; label: string }> = {
@@ -96,6 +98,48 @@ function splitTags(list?: string[]): string[] {
   return out;
 }
 
+function isProfileEmpty(d: ProfileData): boolean {
+  return (
+    !d.description &&
+    !d.cases_text &&
+    [d.products, d.services, d.industries, d.regions, d.certifications, d.brands].every(
+      (l) => !l?.length
+    ) &&
+    !d.filter?.regions?.length &&
+    d.filter?.min_budget == null
+  );
+}
+
+const fmtList = (l?: string[]) => (l?.length ? l.join('、') : '不限');
+const fmtBudget = (v?: number | null) =>
+  v == null ? '不限' : v >= 10000 ? `${v / 10000} 万元` : `${v} 元`;
+
+/** 保存前的变更清单：影响匹配范围的过滤条件逐项列出，其余字段汇总 */
+function computeDiffs(oldD: ProfileData | null, newD: ProfileData): string[] {
+  const out: string[] = [];
+  const oldRegions = fmtList(oldD?.filter?.regions);
+  const newRegions = fmtList(newD.filter?.regions);
+  if (oldRegions !== newRegions) out.push(`仅关注地区：${oldRegions} → ${newRegions}`);
+  const oldBudget = fmtBudget(oldD?.filter?.min_budget);
+  const newBudget = fmtBudget(newD.filter?.min_budget);
+  if (oldBudget !== newBudget) out.push(`最低预算：${oldBudget} → ${newBudget}`);
+  const OTHER: [keyof ProfileData, string][] = [
+    ['description', '企业简介'],
+    ['products', '主要产品'],
+    ['services', '主要服务'],
+    ['industries', '覆盖行业'],
+    ['regions', '业务区域'],
+    ['certifications', '资质证书'],
+    ['brands', '代理品牌'],
+    ['cases_text', '典型案例'],
+  ];
+  const changed = OTHER.filter(
+    ([k]) => JSON.stringify(oldD?.[k] ?? null) !== JSON.stringify(newD[k] ?? null)
+  ).map(([, label]) => label);
+  if (changed.length) out.push(`内容更新：${changed.join('、')}`);
+  return out;
+}
+
 function normalizeProfile<T extends Partial<ProfileData>>(d: T): T {
   return {
     ...d,
@@ -145,10 +189,21 @@ export default function ProfilePage() {
     }
   };
 
+  // 查看态为默认：画像是驱动匹配的"合同"，编辑是显式动作，保存即生效并触发重评估
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingPayload, setPendingPayload] = useState<ProfileData | null>(null);
+  const [diffs, setDiffs] = useState<string[]>([]);
+
   useEffect(() => {
     apiFetch<ProfileData>('/api/profile')
       .then((data) => {
-        form.setFieldsValue(normalizeProfile(data));
+        const normalized = normalizeProfile(data);
+        setProfileData(normalized);
+        form.setFieldsValue(normalized);
+        // 全新租户（画像还是空的）直接进编辑态，老租户默认查看态
+        if (isProfileEmpty(normalized)) setMode('edit');
         // AI 生成画像默认按注册企业名联网检索（可改，比如想按品牌名搜）
         setAiName((prev) => prev || data.name || '');
         setError(null);
@@ -157,6 +212,18 @@ export default function ProfilePage() {
       .finally(() => setLoading(false));
   }, [form]);
 
+  const enterEdit = () => {
+    if (profileData) form.setFieldsValue(profileData);
+    setMode('edit');
+  };
+
+  const cancelEdit = () => {
+    if (profileData) form.setFieldsValue(profileData);
+    setSuggestMeta(null);
+    setMode('view');
+  };
+
+  // 点「保存并生效」：先算关键变更给用户确认，确认后才真正提交
   const onFinish = async (values: ProfileData) => {
     const payload: ProfileData = normalizeProfile({
       name: values.name ?? '',
@@ -173,13 +240,39 @@ export default function ProfilePage() {
         min_budget: values.filter?.min_budget ?? null,
       },
     });
+    const changes = computeDiffs(profileData, payload);
+    if (changes.length === 0) {
+      message.info('画像内容没有变化');
+      setMode('view');
+      return;
+    }
+    setPendingPayload(payload);
+    setDiffs(changes);
+    setConfirmOpen(true);
+  };
+
+  const REMATCH_TIPS: Record<string, string> = {
+    queued: '画像已生效，正在按新画像重新评估近 7 天商机，稍后到工作台查看',
+    cooldown: '画像已生效（10 分钟内已触发过重新评估，本次不再重复）',
+    unchanged: '画像已保存，内容无实质变化',
+    queue_failed: '画像已生效，但重新评估任务提交失败，可稍后再保存一次触发',
+  };
+
+  const confirmSave = async () => {
+    if (!pendingPayload) return;
     setSaving(true);
     try {
-      await apiFetch<{ ok: boolean }>('/api/profile', {
+      const r = await apiFetch<{ ok: boolean; rematch?: string }>('/api/profile', {
         method: 'PUT',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(pendingPayload),
       });
-      message.success('企业画像已保存');
+      message.success(REMATCH_TIPS[r.rematch ?? ''] ?? '企业画像已保存');
+      const merged = { ...pendingPayload, updated_at: new Date().toISOString() };
+      setProfileData(merged);
+      form.setFieldsValue(merged);
+      setConfirmOpen(false);
+      setSuggestMeta(null);
+      setMode('view');
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -208,8 +301,74 @@ export default function ProfilePage() {
           </Card>
         </Space>
       ) : null}
-      {/* Form 始终挂载（加载时隐藏），避免 useForm 实例未连接的警告 */}
-      <div style={{ display: loading ? 'none' : undefined }}>
+      {/* 查看态：当前生效画像的只读展示 */}
+      {!loading && mode === 'view' && profileData ? (
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Card
+            className="compass-card"
+            title="基本信息"
+            extra={
+              <Button type="primary" icon={<EditOutlined />} onClick={enterEdit}>
+                编辑画像
+              </Button>
+            }
+          >
+            <Typography.Title level={5} style={{ marginTop: 0 }}>
+              {profileData.name}
+            </Typography.Title>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              当前生效版本
+              {profileData.updated_at ? ` · 更新于 ${formatDateTime(profileData.updated_at)}` : ''}
+            </Typography.Text>
+            <Typography.Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
+              {profileData.description || <Typography.Text type="secondary">未填写企业简介</Typography.Text>}
+            </Typography.Paragraph>
+          </Card>
+
+          <Card className="compass-card" title="能力标签">
+            <Row gutter={[24, 16]}>
+              {TAG_FIELDS.map((f) => (
+                <Col xs={24} md={12} key={f.name}>
+                  <Typography.Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>
+                    {f.label}
+                  </Typography.Text>
+                  {(profileData[f.name] as string[])?.length ? (
+                    <Space size={[6, 6]} wrap>
+                      {(profileData[f.name] as string[]).map((t) => (
+                        <Tag key={t} color="blue">{t}</Tag>
+                      ))}
+                    </Space>
+                  ) : (
+                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>未填写</Typography.Text>
+                  )}
+                </Col>
+              ))}
+            </Row>
+          </Card>
+
+          <Card className="compass-card" title="推荐过滤（决定匹配范围）">
+            <Space size="large" wrap>
+              <span>
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>仅关注地区：</Typography.Text>
+                <Typography.Text strong>{fmtList(profileData.filter?.regions)}</Typography.Text>
+              </span>
+              <span>
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>最低预算：</Typography.Text>
+                <Typography.Text strong>{fmtBudget(profileData.filter?.min_budget)}</Typography.Text>
+              </span>
+            </Space>
+          </Card>
+
+          <Card className="compass-card" title="典型案例">
+            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+              {profileData.cases_text || <Typography.Text type="secondary">未填写</Typography.Text>}
+            </Typography.Paragraph>
+          </Card>
+        </Space>
+      ) : null}
+
+      {/* 编辑态（Form 始终挂载避免 useForm 未连接警告；查看态下隐藏） */}
+      <div style={{ display: loading || mode === 'view' ? 'none' : undefined }}>
         <Form<ProfileData> form={form} layout="vertical" onFinish={onFinish}>
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Card className="compass-card" title={<span><RobotOutlined style={{ color: '#2F54EB', marginRight: 6 }} />AI 生成画像</span>}>
@@ -325,12 +484,46 @@ export default function ProfilePage() {
               </Row>
             </Card>
 
-            <Button type="primary" htmlType="submit" loading={saving} icon={<SaveOutlined />} size="large">
-              保存画像
-            </Button>
+            <Space>
+              <Button type="primary" htmlType="submit" icon={<SaveOutlined />} size="large">
+                保存并生效
+              </Button>
+              {profileData && !isProfileEmpty(profileData) ? (
+                <Button size="large" onClick={cancelEdit}>
+                  取消
+                </Button>
+              ) : null}
+            </Space>
           </Space>
         </Form>
       </div>
+
+      {/* 保存确认：列出关键变更，明确告知将触发重评估 */}
+      <Modal
+        title="确认画像变更"
+        open={confirmOpen}
+        onOk={confirmSave}
+        onCancel={() => setConfirmOpen(false)}
+        confirmLoading={saving}
+        okText="确认生效"
+        cancelText="再改改"
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
+          本次修改：
+        </Typography.Paragraph>
+        <ul style={{ paddingLeft: 20, marginTop: 0 }}>
+          {diffs.map((d) => (
+            <li key={d}>
+              <Typography.Text>{d}</Typography.Text>
+            </li>
+          ))}
+        </ul>
+        <Alert
+          type="info"
+          showIcon
+          message="保存后将按新画像重新评估近 7 天的商机（已标记跟进的项目不受影响），结果稍后出现在工作台。"
+        />
+      </Modal>
     </AppLayout>
   );
 }

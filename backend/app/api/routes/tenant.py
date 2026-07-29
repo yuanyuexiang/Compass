@@ -18,7 +18,7 @@ from app.core.kv import (
     KEY_QUOTA_PROFILE_SUGGEST,
     get_setting,
 )
-from app.core.ratelimit import try_consume_quota
+from app.core.ratelimit import acquire_cooldown, try_consume_quota
 from app.core.security import CurrentUser, CurrentUserDep
 from app.matching.engine import parse_budget_yuan
 from app.matching.profiles import (
@@ -115,17 +115,45 @@ def get_profile(current: CurrentUser = CurrentUserDep) -> dict:
         )
         tenant = session.get(Tenant, current.tenant_id)
         # 企业名称以注册租户名为唯一权威（审批过的账号身份），画像内不可另起名字
-        return EMPTY_PROFILE | (profile.data if profile else {}) | {"name": tenant.name}
+        return (
+            EMPTY_PROFILE
+            | (profile.data if profile else {})
+            | {
+                "name": tenant.name,
+                "updated_at": profile.updated_at.isoformat() if profile else None,
+            }
+        )
 
 
 @router.put("/profile")
 def put_profile(body: dict, current: CurrentUser = CurrentUserDep) -> dict:
+    """保存画像并生效。画像有实质变更时异步触发重评估（近 7 天商机按新画像重跑，
+    10 分钟冷却防抖）；rematch 字段告知前端触发结果。"""
     data = {k: body.get(k, v) for k, v in EMPTY_PROFILE.items()}
     with session_scope() as session:
         # 强制覆盖为注册企业名：保证右上角、画像、匹配 Prompt、AI 检索口径一致
         data["name"] = session.get(Tenant, current.tenant_id).name
+        profile = session.scalar(
+            select(CompanyProfile).where(CompanyProfile.tenant_id == current.tenant_id)
+        )
+        old = (
+            {k: (profile.data or {}).get(k, v) for k, v in EMPTY_PROFILE.items()}
+            if profile
+            else None
+        )
         upsert_profile(session, current.tenant_id, data)
-        return {"ok": True}
+    if old == data:
+        return {"ok": True, "rematch": "unchanged"}
+    if not acquire_cooldown(f"rematch:{current.tenant_id}", 600):
+        return {"ok": True, "rematch": "cooldown"}
+    try:
+        from app.tasks.pipeline import rematch_tenant_task
+
+        rematch_tenant_task.delay(current.tenant_id)
+        return {"ok": True, "rematch": "queued"}
+    except Exception:
+        logger.exception("重评估任务入队失败 tenant=%s", current.tenant_id)
+        return {"ok": True, "rematch": "queue_failed"}
 
 
 class ProfileSuggestIn(BaseModel):
