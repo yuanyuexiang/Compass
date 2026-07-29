@@ -39,7 +39,10 @@ def main() -> None:
 
     results = []
     for i, it in enumerate(items, 1):
-        ann = SimpleNamespace(title=it["announcement"]["title"])
+        ann = SimpleNamespace(
+            title=it["announcement"]["title"],
+            clean_text=it["announcement"].get("clean_text"),
+        )
         project = SimpleNamespace(
             fields=it["project"].get("fields") or {},
             category=it["project"].get("category") or {},

@@ -44,7 +44,8 @@ class MatchReason(BaseModel):
 
 class MatchScoreCard(BaseModel):
     match_score: float = Field(ge=0, le=100)
-    star: int = Field(ge=1, le=5)
+    # v2 起 star 不再由模型输出（消除映射算错的来源），engine 按 match_score 映射后回填
+    star: int = Field(default=0, ge=0, le=5)
     advice: str
     reasons: list[MatchReason] = []
     risks: dict[str, RiskItem] = {}

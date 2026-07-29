@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.llm_config import extract_completion
-from app.ai.prompts.match_v1 import MATCH_SYSTEM_PROMPT_V1
+from app.ai.prompts.match_v2 import MATCH_SYSTEM_PROMPT_V2
 from app.core.kv import DEFAULT_QUOTA_MATCH, KEY_QUOTA_MATCH, get_setting
 from app.core.ratelimit import try_consume_quota
 from app.matching.profiles import region_stem
@@ -92,29 +92,49 @@ def vector_recall(session: Session, project: Project, tenant_id: int) -> bool:
     return max_sim is not None and max_sim >= VECTOR_SIM_THRESHOLD
 
 
+# 公告原文节选长度：风险判定（品牌/资质/排他条款）需要原文细节，但要控 token 成本
+CLEAN_TEXT_EXCERPT = 1500
+
+
 def build_match_input(project: Project, ann: Announcement, profile: CompanyProfile) -> str:
     fields = {k: (v or {}).get("value") for k, v in (project.fields or {}).items()}
-    return "\n".join(
-        [
-            "【企业能力画像】",
-            profile.summary_text or json.dumps(profile.data, ensure_ascii=False),
-            "",
-            "【招标项目】",
-            f"标题: {ann.title}",
-            f"结构化信息: {json.dumps(fields, ensure_ascii=False)}",
-            f"分类: {json.dumps(project.category, ensure_ascii=False)}",
-            f"摘要: {project.summary}",
-        ]
-    )
+    flt = (profile.data or {}).get("filter") or {}
+    regions = "、".join(flt.get("regions") or []) or "不限"
+    min_budget = flt.get("min_budget")
+    budget_line = f"{min_budget / 10000:g} 万元" if min_budget else "不限"
+    lines = [
+        "【企业能力画像】",
+        profile.summary_text or json.dumps(profile.data, ensure_ascii=False),
+        f"企业硬性筛选条件：关注地区：{regions}；最低预算线：{budget_line}",
+        "",
+        "【招标项目】",
+        f"标题: {ann.title}",
+        f"结构化信息: {json.dumps(fields, ensure_ascii=False)}",
+        f"分类: {json.dumps(project.category, ensure_ascii=False)}",
+        f"摘要: {project.summary}",
+    ]
+    # 原文节选：风险 evidence 的唯一可靠来源（v1 只给摘要，模型只能编证据）
+    if clean_text := getattr(ann, "clean_text", None):
+        lines.append(f"公告原文（节选）: {clean_text[:CLEAN_TEXT_EXCERPT]}")
+    return "\n".join(lines)
 
 
-def llm_rerank(input_text: str, tenant_id: int | None = None) -> MatchScoreCard:
+def star_from_score(score: float) -> int:
+    for threshold, star in STAR_BY_SCORE:
+        if score >= threshold:
+            return star
+    return 1
+
+
+def llm_rerank(
+    input_text: str, tenant_id: int | None = None, system_prompt: str | None = None
+) -> MatchScoreCard:
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             resp = extract_completion(
                 messages=[
-                    {"role": "system", "content": MATCH_SYSTEM_PROMPT_V1},
+                    {"role": "system", "content": system_prompt or MATCH_SYSTEM_PROMPT_V2},
                     {"role": "user", "content": input_text},
                 ],
                 temperature=0.0,
@@ -124,7 +144,10 @@ def llm_rerank(input_text: str, tenant_id: int | None = None) -> MatchScoreCard:
             content = resp.choices[0].message.content
             if not content or not content.strip():
                 raise ValueError("LLM 返回空 content")
-            return MatchScoreCard.model_validate_json(content)
+            card = MatchScoreCard.model_validate_json(content)
+            # star 一律由分数映射（v2 起模型不再输出 star，v1 输出的也覆盖，保证口径唯一）
+            card.star = star_from_score(card.match_score)
+            return card
         except (ValidationError, ValueError) as exc:
             last_error = exc
             logger.warning("精排失败（第 %d/%d 次）: %s", attempt, MAX_ATTEMPTS, exc)
