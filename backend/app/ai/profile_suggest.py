@@ -57,7 +57,17 @@ def confidence_of(site_text: str | None, bids: list, web: list) -> str:
 
 
 def _search_local_bids(name: str, limit: int = 6) -> list[dict]:
-    """本平台公告库检索该企业（优先结果类公告=中标实锤）。零成本，随铺源增长越来越强。"""
+    """本平台公告库检索该企业（优先结果类公告=中标实锤）。零成本，随铺源增长越来越强。
+
+    与其他信源同等的失败降级：数据库不可用时跳过该路（返回空），不阻塞画像生成。"""
+    try:
+        return _search_local_bids_inner(name, limit)
+    except Exception:  # noqa: BLE001
+        logger.warning("本库中标检索失败（%s），跳过该信源", name, exc_info=True)
+        return []
+
+
+def _search_local_bids_inner(name: str, limit: int) -> list[dict]:
     from app.core.db import session_scope
     from app.models import Announcement
 
