@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   App,
@@ -24,7 +24,6 @@ import {
   DeleteOutlined,
   ExperimentOutlined,
   PlusOutlined,
-  SaveOutlined,
 } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api';
@@ -130,9 +129,14 @@ export default function ModelsPage() {
   const [testModel, setTestModel] = useState('');
   const [testing, setTesting] = useState(false);
 
+  // 自动保存控制：load() 引发的 state 变化不应触发自动保存
+  const skipAutosave = useRef(true);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const load = () => {
     apiFetch<LlmConfig>('/api/admin/llm')
       .then((d) => {
+        skipAutosave.current = true;
         setProviders(d.providers);
         setSceneModels(d.scene_models);
         setFallback(d.fallback);
@@ -146,6 +150,49 @@ export default function ModelsPage() {
   };
 
   useEffect(load, []);
+
+  /** 立即持久化（供应商增删改用；传入下一刻的完整配置，避免闭包旧值） */
+  const persist = async (
+    nextProviders: ProviderRow[],
+    nextScene: Record<string, SceneModel>,
+    nextFallback: SceneModel | null
+  ): Promise<boolean> => {
+    try {
+      await apiFetch('/api/admin/llm', {
+        method: 'PUT',
+        body: JSON.stringify({
+          providers: nextProviders.map((p) => ({
+            name: p.name,
+            api_key: p.newKey ?? '',
+            base_url: p.base_url,
+          })),
+          scene_models: nextScene,
+          fallback: nextFallback,
+        }),
+      });
+      message.success({ content: '已保存', key: 'llm-save', duration: 1.2 });
+      return true;
+    } catch (e) {
+      message.error((e as Error).message);
+      return false;
+    }
+  };
+
+  // 场景映射/备用模型改动 → 600ms 防抖自动保存（供应商列表由弹窗流程即时保存）
+  useEffect(() => {
+    if (skipAutosave.current) {
+      skipAutosave.current = false;
+      return;
+    }
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
+      persist(providers, sceneModels, fallback);
+    }, 600);
+    return () => {
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneModels, fallback]);
 
   const openEdit = (p: ProviderRow | null) => {
     setEditing(p);
@@ -167,44 +214,33 @@ export default function ModelsPage() {
   const submitEdit = async () => {
     const v = await editForm.validateFields();
     const name = v.preset === CUSTOM ? v.name.trim() : v.preset;
-    setProviders((ps) => {
-      const rest = ps.filter((p) => p.name !== (editing?.name ?? name) && p.name !== name);
-      return [
-        ...rest,
-        {
-          name,
-          base_url: v.base_url.trim(),
-          api_key_masked: v.api_key.trim() ? '（待保存）' : (editing?.api_key_masked ?? ''),
-          newKey: v.api_key.trim() || editing?.newKey,
-        },
-      ];
-    });
-    setEditOpen(false);
-    message.info('已加入待保存列表，点击「保存配置」生效');
+    const rest = providers.filter((p) => p.name !== (editing?.name ?? name) && p.name !== name);
+    const next = [
+      ...rest,
+      {
+        name,
+        base_url: v.base_url.trim(),
+        api_key_masked: editing?.api_key_masked ?? '',
+        newKey: v.api_key.trim() || undefined,
+      },
+    ];
+    setSaving(true);
+    const ok = await persist(next, sceneModels, fallback);
+    setSaving(false);
+    if (ok) {
+      setEditOpen(false);
+      load();
+    }
   };
 
-  const save = async () => {
-    setSaving(true);
-    try {
-      await apiFetch('/api/admin/llm', {
-        method: 'PUT',
-        body: JSON.stringify({
-          providers: providers.map((p) => ({
-            name: p.name,
-            api_key: p.newKey ?? '',
-            base_url: p.base_url,
-          })),
-          scene_models: sceneModels,
-          fallback,
-        }),
-      });
-      message.success('模型配置已保存，60 秒内全量生效（无需重启）');
-      load();
-    } catch (e) {
-      message.error((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
+  const removeProvider = async (name: string) => {
+    const next = providers.filter((p) => p.name !== name);
+    // 引用该供应商的场景映射/备用一并清掉（后端也会兜底过滤）
+    const nextScene = Object.fromEntries(
+      Object.entries(sceneModels).filter(([, v]) => v.provider !== name)
+    );
+    const nextFallback = fallback?.provider === name ? null : fallback;
+    if (await persist(next, nextScene, nextFallback)) load();
   };
 
   const runTest = async () => {
@@ -260,7 +296,7 @@ export default function ModelsPage() {
           <Button
             size="small"
             icon={<ExperimentOutlined />}
-            disabled={!p.api_key_masked || p.api_key_masked === '（待保存）'}
+            disabled={!p.api_key_masked}
             onClick={() => {
               setTestProvider(p.name);
               setTestModel(sceneModels.default?.model ?? envDefault?.model ?? '');
@@ -273,9 +309,9 @@ export default function ModelsPage() {
             编辑
           </Button>
           <Popconfirm
-            title={`移除供应商「${p.name}」？`}
-            description="引用它的场景映射将失效（保存后生效）"
-            onConfirm={() => setProviders((ps) => ps.filter((x) => x.name !== p.name))}
+            title={`移除供应商「${presetOf(p.name)?.label ?? p.name}」？`}
+            description="引用它的场景映射与备用配置将一并清除"
+            onConfirm={() => removeProvider(p.name)}
           >
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
@@ -389,9 +425,6 @@ export default function ModelsPage() {
             </Card>
           ) : null}
 
-          <Button type="primary" size="large" icon={<SaveOutlined />} loading={saving} onClick={save}>
-            保存配置
-          </Button>
         </Space>
       )}
 
@@ -400,7 +433,8 @@ export default function ModelsPage() {
         open={editOpen}
         onOk={submitEdit}
         onCancel={() => setEditOpen(false)}
-        okText="确定"
+        confirmLoading={saving}
+        okText="保存"
         cancelText="取消"
         destroyOnHidden
       >
