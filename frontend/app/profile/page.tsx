@@ -161,6 +161,67 @@ function computeDiffs(oldD: ProfileData | null, newD: ProfileData): string[] {
   return out;
 }
 
+/** AI 成果预览行：字段级「当前 vs 建议」+ 应用方式 */
+interface SuggestRow {
+  key: string;
+  label: string;
+  kind: 'tags' | 'text';
+  current: string[] | string;
+  suggested: string[] | string;
+  action: 'merge' | 'replace' | 'ignore';
+}
+
+const SUGGEST_FIELD_DEFS: { key: keyof ProfileData; label: string; kind: 'tags' | 'text' }[] = [
+  { key: 'description', label: '企业简介', kind: 'text' },
+  { key: 'products', label: '主要产品', kind: 'tags' },
+  { key: 'services', label: '主要服务', kind: 'tags' },
+  { key: 'industries', label: '覆盖行业', kind: 'tags' },
+  { key: 'regions', label: '业务区域', kind: 'tags' },
+  { key: 'certifications', label: '资质证书', kind: 'tags' },
+  { key: 'brands', label: '代理品牌', kind: 'tags' },
+  { key: 'cases_text', label: '典型案例', kind: 'text' },
+];
+
+/** 从 AI 草稿构建预览行：只含 AI 有产出的字段（没产出的字段不出现、绝不清空现值） */
+function buildSuggestRows(current: Partial<ProfileData>, draft: Partial<ProfileData>): SuggestRow[] {
+  const rows: SuggestRow[] = [];
+  for (const def of SUGGEST_FIELD_DEFS) {
+    const raw = draft[def.key];
+    const suggested = def.kind === 'tags' ? splitTags(raw as string[] | undefined) : String(raw ?? '').trim();
+    const empty = def.kind === 'tags' ? !(suggested as string[]).length : !suggested;
+    if (empty) continue;
+    const cur = def.kind === 'tags'
+      ? splitTags(current[def.key] as string[] | undefined)
+      : String(current[def.key] ?? '').trim();
+    const curEmpty = def.kind === 'tags' ? !(cur as string[]).length : !cur;
+    rows.push({
+      key: def.key,
+      label: def.label,
+      kind: def.kind,
+      current: cur,
+      suggested,
+      // 默认策略：当前为空→填入(replace)；标签类都有→合并；文本类已有内容→忽略（防覆盖手写）
+      action: curEmpty ? 'replace' : def.kind === 'tags' ? 'merge' : 'ignore',
+    });
+  }
+  return rows;
+}
+
+function applySuggestRows(rows: SuggestRow[]): Partial<ProfileData> {
+  const out: Record<string, unknown> = {};
+  for (const r of rows) {
+    if (r.action === 'ignore') continue;
+    if (r.kind === 'tags') {
+      const cur = r.current as string[];
+      const sug = r.suggested as string[];
+      out[r.key] = r.action === 'merge' ? [...new Set([...cur, ...sug])] : sug;
+    } else {
+      out[r.key] = r.suggested;
+    }
+  }
+  return out as Partial<ProfileData>;
+}
+
 function normalizeProfile<T extends Partial<ProfileData>>(d: T): T {
   return {
     ...d,
@@ -181,10 +242,20 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // AI 生成画像：输入企业名 → 联网整理草稿 → 预填表单，用户核对后再保存
+  // AI 生成画像：输入企业名 → 联网整理草稿 → 成果弹窗逐字段确认后应用，用户保存才生效
   const [aiName, setAiName] = useState('');
   const [suggesting, setSuggesting] = useState(false);
   const [suggestMeta, setSuggestMeta] = useState<Omit<ProfileSuggestResult, 'draft'> | null>(null);
+  const [suggestRows, setSuggestRows] = useState<SuggestRow[]>([]);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+
+  const applySuggest = () => {
+    const patch = applySuggestRows(suggestRows);
+    form.setFieldsValue(patch);
+    setSuggestOpen(false);
+    const applied = suggestRows.filter((r) => r.action !== 'ignore').length;
+    message.success(`已应用 ${applied} 个字段的 AI 建议，核对后点「保存并生效」`);
+  };
 
   const runSuggest = async () => {
     const name = aiName.trim();
@@ -200,14 +271,20 @@ export default function ProfilePage() {
       });
       // name 为注册企业名（只读权威字段），不接受 AI 草稿覆盖
       const { name: _draftName, ...draft } = r.draft;
-      form.setFieldsValue(normalizeProfile(draft));
       setSuggestMeta({
         sources: r.sources,
         source_groups: r.source_groups,
         confidence: r.confidence,
         note: r.note,
       });
-      message.success('已生成画像草稿，请核对补充后保存');
+      // 不直接改表单：弹「AI 画像成果」逐字段确认（当前 vs 建议，合并/替换/忽略）
+      const rows = buildSuggestRows(form.getFieldsValue(), draft);
+      if (!rows.length) {
+        message.info('AI 未产出可用的画像内容，请参考来源手动填写');
+        return;
+      }
+      setSuggestRows(rows);
+      setSuggestOpen(true);
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -566,6 +643,76 @@ export default function ProfilePage() {
           </Space>
         </Form>
       </div>
+
+      {/* AI 画像成果：逐字段「当前 vs 建议」，用户决定合并/替换/忽略后才应用到表单 */}
+      <Modal
+        title="AI 画像成果（逐字段确认）"
+        open={suggestOpen}
+        onOk={applySuggest}
+        onCancel={() => setSuggestOpen(false)}
+        okText="应用所选"
+        cancelText="放弃"
+        width={760}
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
+          AI 未产出的字段不在下方列表中，会保持你已填写的内容不变；应用后仍需点「保存并生效」才会入库。
+        </Typography.Paragraph>
+        <Space direction="vertical" size={14} style={{ width: '100%' }}>
+          {suggestRows.map((r, idx) => (
+            <div key={r.key} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 12 }}>
+              <Space size={10} align="center" style={{ marginBottom: 6 }}>
+                <Typography.Text strong>{r.label}</Typography.Text>
+                <Select
+                  size="small"
+                  style={{ width: 130 }}
+                  value={r.action}
+                  onChange={(v) =>
+                    setSuggestRows((rs) =>
+                      rs.map((x, i) => (i === idx ? { ...x, action: v } : x))
+                    )
+                  }
+                  options={[
+                    ...(r.kind === 'tags' &&
+                    (r.current as string[]).length &&
+                    (r.suggested as string[]).length
+                      ? [{ value: 'merge', label: '合并（保留现有）' }]
+                      : []),
+                    {
+                      value: 'replace',
+                      label: (r.kind === 'tags' ? (r.current as string[]).length : r.current)
+                        ? '替换'
+                        : '填入',
+                    },
+                    { value: 'ignore', label: '忽略' },
+                  ]}
+                />
+              </Space>
+              <div style={{ fontSize: 12, display: 'grid', gridTemplateColumns: '44px 1fr', rowGap: 4 }}>
+                <Typography.Text type="secondary">当前</Typography.Text>
+                <span>
+                  {r.kind === 'tags' ? (
+                    (r.current as string[]).length ? (
+                      (r.current as string[]).map((t) => <Tag key={t}>{t}</Tag>)
+                    ) : (
+                      <Typography.Text type="secondary">（空）</Typography.Text>
+                    )
+                  ) : (
+                    (r.current as string) || <Typography.Text type="secondary">（空）</Typography.Text>
+                  )}
+                </span>
+                <Typography.Text type="secondary">建议</Typography.Text>
+                <span>
+                  {r.kind === 'tags'
+                    ? (r.suggested as string[]).map((t) => (
+                        <Tag key={t} color="blue">{t}</Tag>
+                      ))
+                    : (r.suggested as string)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </Space>
+      </Modal>
 
       {/* 保存确认：列出关键变更，明确告知将触发重评估 */}
       <Modal
