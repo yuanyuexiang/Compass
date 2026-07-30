@@ -79,3 +79,26 @@ def test_suggest_profile_fallback_on_garbage(monkeypatch):
     assert r["draft"]["name"] == "某公司"  # 解析失败仍兜底企业名
     assert r["confidence"] == "low"
     assert r["sources"] == ["https://e.com"]
+
+
+def test_bid_snippet():
+    """公告正文按企业名截取证据片段；未命中给开头；空文本给空串。"""
+    from app.ai.profile_suggest import bid_snippet
+
+    text = "A" * 300 + "某某科技有限公司" + "B" * 300
+    snip = bid_snippet(text, "某某科技有限公司")
+    assert "某某科技有限公司" in snip and len(snip) <= 260
+    assert bid_snippet("短文本", "不存在的名字") == "短文本"
+    assert bid_snippet(None, "x") == ""
+    assert bid_snippet("有换行\n的文本某公司在这", "某公司") == "有换行 的文本某公司在这"
+
+
+def test_confidence_of():
+    """置信度按信源覆盖度：官网+中标→high；任一→medium；全空→low。"""
+    from app.ai.profile_suggest import confidence_of
+
+    assert confidence_of("官网文本", [{"t": 1}], []) == "high"
+    assert confidence_of("官网文本", [], []) == "medium"
+    assert confidence_of(None, [{"t": 1}], []) == "medium"
+    assert confidence_of(None, [], [{"t": 1}]) == "medium"
+    assert confidence_of(None, [], []) == "low"

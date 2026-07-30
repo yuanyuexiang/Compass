@@ -175,9 +175,16 @@ export interface ProfileData {
 }
 
 /** AI 生成画像草稿（POST /api/profile/suggest）：draft 预填表单，不含 filter（经营决策手填） */
+export interface SuggestSourceGroup {
+  label: string;
+  items: { title: string | null; link: string | null }[];
+}
+
 export interface ProfileSuggestResult {
   draft: Partial<ProfileData>;
   sources: string[];
+  /** 按信源分组（官网/中标记录/招聘/网页），新版后端返回 */
+  source_groups?: SuggestSourceGroup[];
   confidence: 'high' | 'medium' | 'low' | string;
   note: string;
 }

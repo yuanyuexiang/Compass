@@ -201,7 +201,12 @@ export default function ProfilePage() {
       // name 为注册企业名（只读权威字段），不接受 AI 草稿覆盖
       const { name: _draftName, ...draft } = r.draft;
       form.setFieldsValue(normalizeProfile(draft));
-      setSuggestMeta({ sources: r.sources, confidence: r.confidence, note: r.note });
+      setSuggestMeta({
+        sources: r.sources,
+        source_groups: r.source_groups,
+        confidence: r.confidence,
+        note: r.note,
+      });
       message.success('已生成画像草稿，请核对补充后保存');
     } catch (e) {
       message.error((e as Error).message);
@@ -437,7 +442,32 @@ export default function ProfilePage() {
                     </Space>
                   }
                   description={
-                    suggestMeta.sources.length ? (
+                    suggestMeta.source_groups?.length ? (
+                      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                        {suggestMeta.source_groups.map((g) => (
+                          <Space key={g.label} size={[8, 4]} wrap>
+                            <Tag style={{ fontSize: 11 }}>{g.label}</Tag>
+                            {g.items.map((it, i) =>
+                              it.link ? (
+                                <a
+                                  key={`${g.label}-${i}`}
+                                  href={it.link}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{ fontSize: 12, maxWidth: 320, display: 'inline-block' }}
+                                  className="suggest-source-link"
+                                  title={it.title ?? it.link}
+                                >
+                                  {(it.title ?? it.link).length > 32
+                                    ? `${(it.title ?? it.link).slice(0, 32)}…`
+                                    : it.title ?? it.link}
+                                </a>
+                              ) : null
+                            )}
+                          </Space>
+                        ))}
+                      </Space>
+                    ) : suggestMeta.sources.length ? (
                       <Space size={[8, 4]} wrap>
                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                           来源：
