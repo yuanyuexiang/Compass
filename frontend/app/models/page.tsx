@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   Alert,
   App,
+  AutoComplete,
   Button,
   Card,
   Form,
@@ -36,6 +37,57 @@ interface ProviderRow {
   newKey?: string;
 }
 
+/** 常见供应商预设：选中自动带出 Base URL 与常用模型名（litellm 格式），免去手查文档 */
+const PROVIDER_PRESETS: {
+  value: string;
+  label: string;
+  base_url: string;
+  models: string[];
+}[] = [
+  {
+    value: 'deepseek',
+    label: 'DeepSeek（深度求索）',
+    base_url: '',
+    models: ['deepseek/deepseek-v4-flash', 'deepseek/deepseek-chat', 'deepseek/deepseek-reasoner'],
+  },
+  {
+    value: 'qwen',
+    label: '通义千问（阿里云百炼）',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: ['openai/qwen-plus', 'openai/qwen-max', 'openai/qwen-turbo'],
+  },
+  {
+    value: 'zhipu',
+    label: '智谱 GLM',
+    base_url: 'https://open.bigmodel.cn/api/paas/v4',
+    models: ['openai/glm-4-plus', 'openai/glm-4-air', 'openai/glm-4-flash'],
+  },
+  {
+    value: 'moonshot',
+    label: 'Kimi（月之暗面）',
+    base_url: 'https://api.moonshot.cn/v1',
+    models: ['openai/kimi-k2-0711-preview', 'openai/moonshot-v1-32k'],
+  },
+  {
+    value: 'siliconflow',
+    label: '硅基流动 SiliconFlow',
+    base_url: 'https://api.siliconflow.cn/v1',
+    models: ['openai/deepseek-ai/DeepSeek-V3', 'openai/Qwen/Qwen2.5-72B-Instruct'],
+  },
+  {
+    value: 'openai',
+    label: 'OpenAI',
+    base_url: '',
+    models: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
+  },
+];
+
+const CUSTOM = '__custom__';
+
+function presetOf(name: string) {
+  return PROVIDER_PRESETS.find((p) => p.value === name);
+}
+
 interface SceneModel {
   provider: string;
   model: string;
@@ -65,7 +117,13 @@ export default function ModelsPage() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<ProviderRow | null>(null);
-  const [editForm] = Form.useForm<{ name: string; api_key: string; base_url: string }>();
+  const [editForm] = Form.useForm<{
+    preset: string;
+    name: string;
+    api_key: string;
+    base_url: string;
+  }>();
+  const watchedPreset = Form.useWatch('preset', editForm);
 
   const [testOpen, setTestOpen] = useState(false);
   const [testProvider, setTestProvider] = useState('');
@@ -91,13 +149,24 @@ export default function ModelsPage() {
 
   const openEdit = (p: ProviderRow | null) => {
     setEditing(p);
-    editForm.setFieldsValue({ name: p?.name ?? '', api_key: '', base_url: p?.base_url ?? '' });
+    editForm.setFieldsValue({
+      preset: p ? (presetOf(p.name) ? p.name : CUSTOM) : PROVIDER_PRESETS[0].value,
+      name: p?.name ?? '',
+      api_key: '',
+      base_url: p?.base_url ?? (p ? '' : PROVIDER_PRESETS[0].base_url),
+    });
     setEditOpen(true);
+  };
+
+  const onPresetChange = (v: string) => {
+    const preset = presetOf(v);
+    // 切换预设自动带出该家的 Base URL（自定义则清空待填）
+    editForm.setFieldsValue({ base_url: preset?.base_url ?? '' });
   };
 
   const submitEdit = async () => {
     const v = await editForm.validateFields();
-    const name = v.name.trim();
+    const name = v.preset === CUSTOM ? v.name.trim() : v.preset;
     setProviders((ps) => {
       const rest = ps.filter((p) => p.name !== (editing?.name ?? name) && p.name !== name);
       return [
@@ -158,10 +227,18 @@ export default function ModelsPage() {
     }
   };
 
-  const providerOptions = providers.map((p) => ({ value: p.name, label: p.name }));
+  const providerOptions = providers.map((p) => ({
+    value: p.name,
+    label: presetOf(p.name)?.label ?? p.name,
+  }));
 
   const columns: ColumnsType<ProviderRow> = [
-    { title: '名称', dataIndex: 'name', width: 140, render: (v) => <strong>{v}</strong> },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      width: 200,
+      render: (v: string) => <strong>{presetOf(v)?.label ?? v}</strong>,
+    },
     {
       title: 'API Key',
       dataIndex: 'api_key_masked',
@@ -234,12 +311,13 @@ export default function ModelsPage() {
             prov ? setCur({ provider: prov, model: cur?.model ?? '' }) : setCur(null)
           }
         />
-        <Input
+        <AutoComplete
           placeholder="litellm 模型名，如 deepseek/deepseek-v4-flash"
           style={{ width: 300 }}
           value={cur?.model ?? ''}
           disabled={!cur?.provider}
-          onChange={(e) => cur && setCur({ ...cur, model: e.target.value })}
+          options={(presetOf(cur?.provider ?? '')?.models ?? []).map((m) => ({ value: m }))}
+          onChange={(v) => cur && setCur({ ...cur, model: v })}
         />
       </Space>
     );
@@ -327,13 +405,28 @@ export default function ModelsPage() {
         destroyOnHidden
       >
         <Form form={editForm} layout="vertical" style={{ marginTop: 8 }}>
-          <Form.Item
-            name="name"
-            label="名称（标识用，如 deepseek / qwen / zhipu）"
-            rules={[{ required: true, message: '请输入名称' }]}
-          >
-            <Input maxLength={32} disabled={!!editing} />
+          <Form.Item name="preset" label="供应商" rules={[{ required: true, message: '请选择供应商' }]}>
+            <Select
+              disabled={!!editing}
+              onChange={onPresetChange}
+              options={[
+                ...PROVIDER_PRESETS.map((p) => ({ value: p.value, label: p.label })),
+                { value: CUSTOM, label: '自定义（其他 OpenAI 兼容服务）' },
+              ]}
+            />
           </Form.Item>
+          {watchedPreset === CUSTOM ? (
+            <Form.Item
+              name="name"
+              label="自定义名称（标识用，小写英文）"
+              rules={[
+                { required: true, message: '请输入名称' },
+                { pattern: /^[a-z][a-z0-9_-]{1,31}$/, message: '小写字母开头，可含数字/中划线' },
+              ]}
+            >
+              <Input maxLength={32} placeholder="如 my-gateway" />
+            </Form.Item>
+          ) : null}
           <Form.Item
             name="api_key"
             label="API Key"
@@ -364,12 +457,16 @@ export default function ModelsPage() {
         <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
           将用该供应商已保存的密钥发起一次最小调用，实测连通性、密钥有效性与余额状态。
         </Typography.Paragraph>
-        <Input
-          addonBefore="模型"
-          value={testModel}
-          onChange={(e) => setTestModel(e.target.value)}
-          placeholder="deepseek/deepseek-v4-flash"
-        />
+        <Space.Compact style={{ width: '100%' }}>
+          <Input style={{ width: 64 }} value="模型" disabled />
+          <AutoComplete
+            style={{ flex: 1 }}
+            value={testModel}
+            onChange={(v) => setTestModel(v)}
+            options={(presetOf(testProvider)?.models ?? []).map((m) => ({ value: m }))}
+            placeholder="deepseek/deepseek-v4-flash"
+          />
+        </Space.Compact>
       </Modal>
     </AppLayout>
   );
