@@ -8,6 +8,7 @@ import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
 import type { MenuProps } from 'antd';
 import {
   ApartmentOutlined,
+  ApiOutlined,
   BellOutlined,
   CloudDownloadOutlined,
   CompassOutlined,
@@ -53,6 +54,7 @@ const ADMIN_MENU_ITEMS = [
 // 采集源全局共享，增改/启停会影响所有租户 → 采集管理仅平台管理员可见
 const PLATFORM_MENU_ITEMS = [
   { key: '/sources', icon: <CloudDownloadOutlined />, label: <Link href="/sources">采集管理</Link> },
+  { key: '/models', icon: <ApiOutlined />, label: <Link href="/models">模型服务</Link> },
   { key: '/tenants', icon: <ApartmentOutlined />, label: <Link href="/tenants">租户管理</Link> },
 ];
 
@@ -91,6 +93,7 @@ const PAGE_LABELS: Record<string, string> = {
   '/notifications': '通知中心',
   '/members': '成员管理',
   '/sources': '采集管理',
+  '/models': '模型服务',
   '/tenants': '租户管理',
 };
 

@@ -64,3 +64,46 @@ def test_clean_username():
         tenant_name=" 某公司 ", username=" Johnson ", password="Abcd1234"
     ).username == "Johnson"
     assert LoginIn(username=" Johnson ", password="x").username == "Johnson"
+
+
+def test_crypto_roundtrip_and_mask():
+    """API Key 加密往返 + 脱敏展示 + 解密失败按未配置处理。"""
+    from app.core.crypto import decrypt, encrypt, mask
+
+    enc = encrypt("sk-abc123456789")
+    assert enc.startswith("enc:") and "sk-abc" not in enc
+    assert decrypt(enc) == "sk-abc123456789"
+    assert decrypt("") == ""
+    assert decrypt("enc:corrupted") == ""  # 密文损坏 → 空串（按未配置）
+    assert decrypt("plain-legacy") == "plain-legacy"  # 历史明文兼容
+    assert mask("sk-abc123456789") == "···6789"
+    assert mask("short") == "···"
+    assert mask("") == ""
+
+
+def test_resolve_llm_target_precedence():
+    """场景模型解析优先级：场景映射 > default 映射 > .env 兜底；fallback 需供应商存在。"""
+    from app.ai.llm_config import resolve_llm_fallback, resolve_llm_target
+    from app.core.config import settings
+
+    cfg = {
+        "providers": {
+            "ds": {"api_key": "k1", "base_url": None},
+            "qw": {"api_key": "k2", "base_url": "https://qw.example/v1"},
+        },
+        "scene_models": {
+            "default": {"provider": "ds", "model": "deepseek/deepseek-v4-flash"},
+            "match": {"provider": "qw", "model": "openai/qwen-plus"},
+        },
+        "fallback": {"provider": "qw", "model": "openai/qwen-plus"},
+    }
+    t = resolve_llm_target(cfg, "match")
+    assert t["model"] == "openai/qwen-plus" and t["api_key"] == "k2"
+    t = resolve_llm_target(cfg, "extract")  # 未映射场景走 default
+    assert t["model"] == "deepseek/deepseek-v4-flash" and t["api_key"] == "k1"
+    t = resolve_llm_target({"providers": {}, "scene_models": {}}, "match")  # 空配置走 .env
+    assert t["model"] == settings.llm_extract_model
+    fb = resolve_llm_fallback(cfg)
+    assert fb and fb["base_url"] == "https://qw.example/v1"
+    bad = {"providers": {}, "fallback": {"provider": "nope", "model": "x"}}
+    assert resolve_llm_fallback(bad) is None

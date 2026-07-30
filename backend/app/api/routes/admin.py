@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.core.db import session_scope
@@ -200,6 +201,7 @@ def system_health(current: CurrentUser = PlatformAdminDep) -> dict:
             "consecutive_failures": llm_failures,
             "ok": llm_failures < 3,
             "last_error": note_get("llm_last_error"),
+            "fallback_last": note_get("llm_fallback_last"),
             "last_success_at": llm_last_success.isoformat() if llm_last_success else None,
         },
         "scheduler": {
@@ -209,6 +211,149 @@ def system_health(current: CurrentUser = PlatformAdminDep) -> dict:
         },
         "stale_sources": stale_sources,
     }
+
+
+LLM_SCENES = {
+    "default": "默认模型",
+    "extract": "字段提取",
+    "match": "匹配精排",
+    "nl_search": "NL 搜索",
+    "profile_suggest": "AI 画像",
+    "source_suggest": "AI 识别数据源",
+}
+
+
+class LlmProviderIn(BaseModel):
+    name: str = Field(min_length=1, max_length=32)
+    api_key: str = ""  # 空 = 保留已存密钥（接口永不回传明文，前端只提交改动）
+    base_url: str = Field(default="", max_length=200)
+
+
+class LlmSceneModelIn(BaseModel):
+    provider: str
+    model: str = Field(min_length=1, max_length=100)
+
+
+class LlmConfigIn(BaseModel):
+    providers: list[LlmProviderIn] = []
+    scene_models: dict[str, LlmSceneModelIn | None] = {}
+    fallback: LlmSceneModelIn | None = None
+
+
+@router.get("/llm")
+def get_llm_config(current: CurrentUser = PlatformAdminDep) -> dict:
+    from app.core.config import settings
+    from app.core.crypto import decrypt, mask
+    from app.core.kv import KEY_LLM_FALLBACK, KEY_LLM_PROVIDERS, KEY_LLM_SCENE_MODELS, get_setting
+
+    cutoff = datetime.now(UTC) - timedelta(days=7)
+    with session_scope() as session:
+        providers = get_setting(session, KEY_LLM_PROVIDERS, []) or []
+        scene_models = get_setting(session, KEY_LLM_SCENE_MODELS, {}) or {}
+        fallback = get_setting(session, KEY_LLM_FALLBACK, None)
+        usage = session.execute(
+            select(
+                LlmUsage.model,
+                func.count(LlmUsage.id),
+                func.coalesce(func.sum(LlmUsage.total_tokens), 0),
+            )
+            .where(LlmUsage.created_at >= cutoff)
+            .group_by(LlmUsage.model)
+        ).all()
+    return {
+        "providers": [
+            {
+                "name": p.get("name"),
+                "base_url": p.get("base_url") or "",
+                "api_key_masked": mask(decrypt(p.get("api_key") or "")),
+            }
+            for p in providers
+        ],
+        "scene_models": scene_models,
+        "fallback": fallback,
+        "scenes": LLM_SCENES,
+        "env_default": {
+            "model": settings.llm_extract_model,
+            "configured": bool(settings.deepseek_api_key),
+        },
+        "usage_7d": [
+            {"model": m or "（未知）", "calls": c, "total_tokens": int(t)} for m, c, t in usage
+        ],
+    }
+
+
+@router.put("/llm")
+def put_llm_config(body: LlmConfigIn, current: CurrentUser = PlatformAdminDep) -> dict:
+    from app.ai.llm_config import invalidate_llm_config_cache
+    from app.core.crypto import encrypt
+    from app.core.kv import (
+        KEY_LLM_FALLBACK,
+        KEY_LLM_PROVIDERS,
+        KEY_LLM_SCENE_MODELS,
+        get_setting,
+        set_setting,
+    )
+
+    with session_scope() as session:
+        old = {p.get("name"): p for p in get_setting(session, KEY_LLM_PROVIDERS, []) or []}
+        stored, names = [], set()
+        for p in body.providers:
+            name = p.name.strip()
+            if not name or name in names:
+                continue
+            if p.api_key.strip():
+                enc = encrypt(p.api_key.strip())
+            elif name in old:
+                enc = old[name].get("api_key") or ""
+            else:
+                raise HTTPException(status_code=422, detail=f"供应商「{name}」缺少 API Key")
+            names.add(name)
+            stored.append({"name": name, "api_key": enc, "base_url": p.base_url.strip()})
+        scene_models = {
+            k: {"provider": v.provider, "model": v.model.strip()}
+            for k, v in body.scene_models.items()
+            if k in LLM_SCENES and v is not None and v.provider in names and v.model.strip()
+        }
+        fallback = (
+            {"provider": body.fallback.provider, "model": body.fallback.model.strip()}
+            if body.fallback and body.fallback.provider in names
+            else None
+        )
+        set_setting(session, KEY_LLM_PROVIDERS, stored)
+        set_setting(session, KEY_LLM_SCENE_MODELS, scene_models)
+        set_setting(session, KEY_LLM_FALLBACK, fallback)
+    invalidate_llm_config_cache()
+    return {"ok": True, "providers": len(stored)}
+
+
+@router.post("/llm/test")
+def test_llm_provider(body: LlmSceneModelIn, current: CurrentUser = PlatformAdminDep) -> dict:
+    """用已存密钥对指定 供应商+模型 发一次最小调用，实测连通性/余额/密钥有效性。"""
+    from app.ai.llm_config import extract_completion, friendly_llm_error
+    from app.core.crypto import decrypt
+    from app.core.kv import KEY_LLM_PROVIDERS, get_setting
+
+    with session_scope() as session:
+        providers = {
+            p.get("name"): p for p in get_setting(session, KEY_LLM_PROVIDERS, []) or []
+        }
+    p = providers.get(body.provider)
+    key = decrypt(p.get("api_key") or "") if p else ""
+    if not key:
+        raise HTTPException(status_code=422, detail="该供应商尚未保存有效的 API Key")
+    target = {"model": body.model, "api_key": key, "base_url": p.get("base_url") or None}
+    try:
+        extract_completion(
+            # 注意：json_object 模式要求提示词里出现 "json" 字样（DeepSeek/OpenAI 通用约束）
+            [{"role": "user", "content": '输出 json：{"ok": true}'}],
+            scene="admin_test",
+            model_override=target,
+            max_tokens=20,
+            timeout=25,
+        )
+        return {"ok": True, "message": "连接正常，密钥有效"}
+    except Exception as exc:  # noqa: BLE001  测试端点把异常转为结果返回
+        return {"ok": False, "message": friendly_llm_error(exc) or str(exc)[:200]}
 
 
 @router.get("/usage")

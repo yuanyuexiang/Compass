@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 from app.models import SystemSetting
 
 KEY_CRAWL_INTERVAL = "crawl_interval_minutes"
+# LLM 模型服务配置（平台管理员在「模型服务」页维护；api_key 经 core/crypto 加密存储）
+KEY_LLM_PROVIDERS = "llm_providers"  # [{name, api_key(密文), base_url}]
+KEY_LLM_SCENE_MODELS = "llm_scene_models"  # {default|extract|match|...: {provider, model}}
+KEY_LLM_FALLBACK = "llm_fallback"  # {provider, model}，主模型失败自动切换
 KEY_LAST_AUTO_CRAWL = "last_auto_crawl_at"
 DEFAULT_CRAWL_INTERVAL_MINUTES = 30
 

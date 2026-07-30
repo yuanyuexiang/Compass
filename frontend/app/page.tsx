@@ -45,6 +45,7 @@ interface HealthData {
     consecutive_failures: number;
     ok: boolean;
     last_error: string | null;
+    fallback_last: string | null;
     last_success_at: string | null;
   };
   scheduler: { ok: boolean; last_auto_crawl_at: string | null; interval_minutes: number };
@@ -479,6 +480,11 @@ export default function DashboardPage() {
                   </Tag>
                 </Tooltip>
               )}
+              {health.llm.fallback_last ? (
+                <Tooltip title={health.llm.fallback_last}>
+                  <Tag icon={<WarningOutlined />} color="orange">启用过备用模型</Tag>
+                </Tooltip>
+              ) : null}
             </Space>
             <Space size={6}>
               <Typography.Text type="secondary" style={{ fontSize: 13 }}>采集调度</Typography.Text>
