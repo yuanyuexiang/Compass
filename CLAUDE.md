@@ -52,7 +52,7 @@ uv run python scripts/dev_match.py             # 发布+匹配+通知演练
 - **LLM 约定**：直接用 LiteLLM（入口 `ai/llm_config.py`），模型 `deepseek-v4-flash`（旧模型名已弃用）。Prompt 一律放 `ai/prompts/` 版本化（该目录豁免行长 lint）。**对 LLM 输出做宽容解析**（历史教训：模型会把字符串字段包成 {value,...} 对象且重试不自愈）——见 `ai/schemas.py`、`matching/schemas.py` 的 field_validator。
 - **匹配链路**（`matching/engine.py`）：规则硬过滤 → 向量软信号（只记录/排序，不按固定阈值淘汰）→ LLM 分维判断；代码按主体业务35/案例20/产品服务15/资质15/地区5/经营偏好10确定性汇总并应用能力、合作模式和明确缺资质封顶。分维证据与向量相似度存 `match_results.score_details`。**画像变更重评估**：画像页查看态/编辑态分离（保存是显式动作，确认弹窗列关键变更），保存有实质变更时异步跑 `rematch_tenant_task`（近 7 天已发布可投标且在关注源内的公告，`run_match(force=True)` 更新评分**保留 follow_status**、新规则排除时删除未跟进的旧结果；10 分钟冷却防抖，受每日精排配额封顶，不发即时通知）。
 - **自然语言查询**（`ai/nl_search.py`）：商机页搜索框把口语查询交 LLM 解析成结构化 DSL（`POST /api/search/nl`，`api/routes/tenant.py`，前端 opportunities 页），解析失败降级为 `{keyword: 原文}` 关键词搜索，保证有结果。商机查询（普通+NL）默认按画像 `filter.regions` 过滤地区（与推荐口径统一，共享 `matching/profiles.py` 的 `region_filter_clause`），前端有「仅看关注地区」开关可放开。
-- **AI 企业画像**（`ai/profile_suggest.py` + `ai/websearch.py`）：画像页输入企业名 → 秘塔 AI 搜索联网检索（`POST /api/v1/search`，滤除天眼查/企查查等聚合平台守合规红线）→ LLM 整理成草稿（`POST /api/profile/suggest`，**不落库**，仅预填表单供人工确认，防幻觉）→ 用户改后走 `PUT /api/profile` 存。只产描述性字段，`filter`（关注地区/最低预算）属经营决策手填。
+- **AI 企业画像**：联网草稿仍走 `ai/profile_suggest.py` + `ai/websearch.py`（屏蔽商业企业聚合站，仅预填、用户保存才生效）。企业材料链路走 `ai/profile_materials.py`：租户上传 PDF/DOCX/TXT 中标材料 → MinIO 原件 + 本地解析文本 → Celery 抽取 `profile_facts` 与逐字可定位的 `profile_evidence` → 用户逐条确认 → 投影到 `company_profiles` 兼容快照并重评估；未经确认的事实不得参与匹配。经营过滤条件始终由用户填写。
 - **通知**（`notify/`）：站内信必写兜底，外部渠道（email/企微/钉钉/飞书）按 Subscription.channels 配置驱动，单渠道失败不影响其他。
 
 ## 产品背景速览

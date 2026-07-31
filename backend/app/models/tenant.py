@@ -78,6 +78,59 @@ class ProfileChunk(Base):
     embedding = mapped_column(Vector(settings.embedding_dim), nullable=True)
 
 
+class ProfileMaterial(Base):
+    """企业提供或系统发现的画像材料；原件在 MinIO，解析文本按租户隔离入库。"""
+
+    __tablename__ = "profile_materials"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    source_type: Mapped[str] = mapped_column(String(32), default="uploaded_document")
+    document_type: Mapped[str] = mapped_column(String(32), default="award_notice")
+    filename: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str | None] = mapped_column(String(128))
+    object_key: Mapped[str | None] = mapped_column(Text)
+    parsed_text: Mapped[str | None] = mapped_column(Text)
+    parse_status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    needs_ocr: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProfileFact(Base):
+    """AI 从材料抽取的原子事实；pending 经用户确认后才投影到正式画像。"""
+
+    __tablename__ = "profile_facts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    fact_type: Mapped[str] = mapped_column(String(32), index=True)
+    canonical_key: Mapped[str | None] = mapped_column(String(256), index=True)
+    value: Mapped[dict] = mapped_column(JSONB, default=dict)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    source_strength: Mapped[str] = mapped_column(String(32), default="document_proof")
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProfileEvidence(Base):
+    """事实与材料的细粒度证据绑定。"""
+
+    __tablename__ = "profile_evidence"
+    __table_args__ = (UniqueConstraint("fact_id", "material_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    fact_id: Mapped[int] = mapped_column(ForeignKey("profile_facts.id"), index=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("profile_materials.id"), index=True)
+    page: Mapped[int | None] = mapped_column(Integer)
+    quote: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class MatchResult(Base):
     __tablename__ = "match_results"
     __table_args__ = (UniqueConstraint("tenant_id", "project_id"),)

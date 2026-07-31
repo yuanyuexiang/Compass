@@ -196,6 +196,53 @@ export interface ProfileSuggestResult {
   note: string;
 }
 
+export type ProfileMaterialStatus =
+  | 'parsed'
+  | 'extracting'
+  | 'extracted'
+  | 'no_facts'
+  | 'extract_failed'
+  | 'needs_ocr';
+
+export interface ProfileMaterialItem {
+  id: number;
+  filename: string;
+  source_type: string;
+  document_type: string;
+  content_type: string | null;
+  parse_status: ProfileMaterialStatus | string;
+  needs_ocr: boolean;
+  error: string | null;
+  fact_count: number;
+  created_at: string;
+}
+
+export interface ProjectCaseFactValue {
+  project_name: string;
+  company_role: 'winner' | 'supplier' | 'consortium_member' | 'candidate' | 'mentioned' | 'unknown';
+  customer: string | null;
+  amount_yuan: number | null;
+  region: string | null;
+  awarded_at: string | null;
+  services: string[];
+}
+
+export interface ProfileFactItem {
+  id: number;
+  fact_type: 'project_case' | string;
+  value: ProjectCaseFactValue;
+  confidence: number;
+  source_strength: string;
+  status: 'pending' | 'confirmed' | 'rejected';
+  evidence: {
+    material_id: number;
+    filename: string;
+    page: number | null;
+    quote: string;
+  } | null;
+  created_at: string;
+}
+
 export interface EmailChannel {
   enabled: boolean;
   address: string;

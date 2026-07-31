@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import embeddings
 from app.ai.extract import build_input, extract_project
+from app.ai.profile_materials import run_material_extraction
 from app.core import storage
 from app.core.db import session_scope
 from app.crawler.base import SourceAdapter, ensure_cst, get_adapter, url_fingerprint
@@ -22,6 +23,7 @@ from app.models import (
     AnnouncementStatus,
     Attachment,
     CompanyProfile,
+    ProfileMaterial,
     Project,
     Source,
     SourceStatus,
@@ -35,6 +37,27 @@ from app.parsing.documents import parse_attachment
 from app.tasks.celery_app import celery
 
 logger = logging.getLogger(__name__)
+
+
+@celery.task(name="app.tasks.pipeline.profile_material_extract")
+def profile_material_extract_task(material_id: int) -> None:
+    """后台提取企业材料；失败状态保留供前端展示和人工重试。"""
+    try:
+        with session_scope() as session:
+            material = session.get(ProfileMaterial, material_id)
+            if material is None:
+                return
+            material.parse_status = "extracting"
+            material.error = None
+        with session_scope() as session:
+            run_material_extraction(session, material_id)
+    except Exception as exc:  # noqa: BLE001  需要把第三方 LLM 错误落到材料状态
+        logger.exception("画像材料抽取失败 material=%s", material_id)
+        with session_scope() as session:
+            material = session.get(ProfileMaterial, material_id)
+            if material is not None:
+                material.parse_status = "extract_failed"
+                material.error = str(exc)[:1000]
 
 
 def run_crawl_source(session: Session, source: Source, limit: int | None = None) -> list[int]:

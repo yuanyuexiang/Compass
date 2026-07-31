@@ -1,15 +1,21 @@
 """租户层接口：推荐、跟进、画像、订阅、通知、NL 搜索。全部按 tenant_id 强制隔离。"""
 
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated
+from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import delete, select
 
 from app.ai import websearch
 from app.ai.llm_config import friendly_llm_error
 from app.ai.nl_search import parse_query
+from app.ai.profile_materials import ProjectCaseValue, project_confirmed_case
 from app.ai.profile_suggest import suggest_profile
+from app.core import storage
 from app.core.db import session_scope
 from app.core.kv import (
     DEFAULT_QUOTA_NL_SEARCH,
@@ -32,15 +38,21 @@ from app.models import (
     CompanyProfile,
     MatchResult,
     Notification,
+    ProfileEvidence,
+    ProfileFact,
+    ProfileMaterial,
     Project,
     Subscription,
     Tenant,
 )
+from app.parsing.documents import parse_attachment
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
 
 FOLLOW_STATUSES = ("待看", "跟进中", "放弃", "已投标")
+PROFILE_MATERIAL_MAX_BYTES = 20 * 1024 * 1024
+PROFILE_MATERIAL_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 
 @router.get("/recommendations")
@@ -145,16 +157,21 @@ def put_profile(body: dict, current: CurrentUser = CurrentUserDep) -> dict:
         upsert_profile(session, current.tenant_id, data)
     if old == data:
         return {"ok": True, "rematch": "unchanged"}
-    if not acquire_cooldown(f"rematch:{current.tenant_id}", 600):
-        return {"ok": True, "rematch": "cooldown"}
+    return {"ok": True, "rematch": _queue_profile_rematch(current.tenant_id)}
+
+
+def _queue_profile_rematch(tenant_id: int) -> str:
+    """复用画像保存后的异步重评估策略。"""
+    if not acquire_cooldown(f"rematch:{tenant_id}", 600):
+        return "cooldown"
     try:
         from app.tasks.pipeline import rematch_tenant_task
 
-        rematch_tenant_task.delay(current.tenant_id)
-        return {"ok": True, "rematch": "queued"}
+        rematch_tenant_task.delay(tenant_id)
+        return "queued"
     except Exception:
-        logger.exception("重评估任务入队失败 tenant=%s", current.tenant_id)
-        return {"ok": True, "rematch": "queue_failed"}
+        logger.exception("重评估任务入队失败 tenant=%s", tenant_id)
+        return "queue_failed"
 
 
 class ProfileSuggestIn(BaseModel):
@@ -184,6 +201,239 @@ def profile_suggest(body: ProfileSuggestIn, current: CurrentUser = CurrentUserDe
         raise HTTPException(
             status_code=502, detail=f"生成画像失败：{friendly_llm_error(exc) or exc}"
         ) from exc
+
+
+def _material_dict(material: ProfileMaterial, fact_count: int = 0) -> dict:
+    return {
+        "id": material.id,
+        "filename": material.filename,
+        "source_type": material.source_type,
+        "document_type": material.document_type,
+        "content_type": material.content_type,
+        "parse_status": material.parse_status,
+        "needs_ocr": material.needs_ocr,
+        "error": material.error,
+        "fact_count": fact_count,
+        "created_at": material.created_at,
+    }
+
+
+@router.get("/profile/materials")
+def list_profile_materials(current: CurrentUser = CurrentUserDep) -> list[dict]:
+    with session_scope() as session:
+        materials = session.scalars(
+            select(ProfileMaterial)
+            .where(ProfileMaterial.tenant_id == current.tenant_id)
+            .order_by(ProfileMaterial.id.desc())
+        ).all()
+        counts = {
+            material.id: sum(
+                1
+                for _ in session.scalars(
+                    select(ProfileEvidence).where(ProfileEvidence.material_id == material.id)
+                )
+            )
+            for material in materials
+        }
+        return [_material_dict(material, counts.get(material.id, 0)) for material in materials]
+
+
+@router.post("/profile/materials")
+async def upload_profile_material(
+    file: Annotated[UploadFile, File()],
+    document_type: Annotated[str, Form()] = "award_notice",
+    current: CurrentUser = CurrentUserDep,
+) -> dict:
+    """上传企业材料；原件入 MinIO，文本本地解析，案例抽取交给后台任务。"""
+    filename = Path(file.filename or "material").name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in PROFILE_MATERIAL_EXTENSIONS:
+        raise HTTPException(status_code=422, detail="仅支持 PDF、DOCX、TXT 文件")
+    if document_type != "award_notice":
+        raise HTTPException(status_code=422, detail="当前版本仅支持中标/成交通知材料")
+    data = await file.read(PROFILE_MATERIAL_MAX_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=422, detail="文件内容为空")
+    if len(data) > PROFILE_MATERIAL_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="文件不能超过 20MB")
+    try:
+        parsed_text, needs_ocr = parse_attachment(filename, data)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"文件解析失败：{exc}") from exc
+
+    object_key = f"profiles/{current.tenant_id}/{uuid4().hex}-{filename}"
+    stored_key = storage.put_bytes(
+        object_key, data, file.content_type or "application/octet-stream"
+    )
+    if stored_key is None:
+        raise HTTPException(status_code=503, detail="文件存储暂不可用，请稍后重试")
+    with session_scope() as session:
+        material = ProfileMaterial(
+            tenant_id=current.tenant_id,
+            source_type="uploaded_document",
+            document_type=document_type,
+            filename=filename,
+            content_type=file.content_type,
+            object_key=stored_key,
+            parsed_text=parsed_text or None,
+            parse_status="needs_ocr" if needs_ocr else "parsed",
+            needs_ocr=needs_ocr,
+            error="扫描件暂不支持 OCR，请上传可复制文字的 PDF" if needs_ocr else None,
+        )
+        session.add(material)
+        session.flush()
+        material_id = material.id
+    if parsed_text and not needs_ocr:
+        try:
+            from app.tasks.pipeline import profile_material_extract_task
+
+            profile_material_extract_task.delay(material_id)
+        except Exception as exc:  # 材料已安全入库，队列失败允许前端重试
+            logger.exception("画像材料抽取任务入队失败 material=%s", material_id)
+            with session_scope() as session:
+                material = session.get(ProfileMaterial, material_id)
+                material.error = f"抽取任务提交失败：{exc}"[:1000]
+    with session_scope() as session:
+        return _material_dict(session.get(ProfileMaterial, material_id))
+
+
+@router.post("/profile/materials/{material_id}/extract")
+def retry_profile_material_extract(
+    material_id: int, current: CurrentUser = CurrentUserDep
+) -> dict:
+    with session_scope() as session:
+        material = session.get(ProfileMaterial, material_id)
+        if material is None or material.tenant_id != current.tenant_id:
+            raise HTTPException(status_code=404, detail="材料不存在")
+        if material.parse_status == "extracting":
+            raise HTTPException(status_code=409, detail="材料正在抽取中，请勿重复提交")
+        if not material.parsed_text or material.needs_ocr:
+            raise HTTPException(status_code=422, detail="材料没有可提取文本")
+        material.parse_status = "parsed"
+        material.error = None
+    try:
+        from app.tasks.pipeline import profile_material_extract_task
+
+        profile_material_extract_task.delay(material_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="抽取任务提交失败，请稍后重试") from exc
+    return {"ok": True}
+
+
+@router.delete("/profile/materials/{material_id}")
+def delete_profile_material(material_id: int, current: CurrentUser = CurrentUserDep) -> dict:
+    object_key: str | None = None
+    with session_scope() as session:
+        material = session.get(ProfileMaterial, material_id)
+        if material is None or material.tenant_id != current.tenant_id:
+            raise HTTPException(status_code=404, detail="材料不存在")
+        object_key = material.object_key
+        fact_ids = session.scalars(
+            select(ProfileEvidence.fact_id).where(ProfileEvidence.material_id == material.id)
+        ).all()
+        session.execute(delete(ProfileEvidence).where(ProfileEvidence.material_id == material.id))
+        session.flush()
+        if fact_ids:
+            for fact in session.scalars(
+                select(ProfileFact).where(ProfileFact.id.in_(fact_ids))
+            ):
+                has_other_evidence = session.scalar(
+                    select(ProfileEvidence.id).where(ProfileEvidence.fact_id == fact.id).limit(1)
+                )
+                if fact.status == "confirmed":
+                    if not has_other_evidence:
+                        fact.source_strength = "tenant_confirmed"
+                elif not has_other_evidence:
+                    session.delete(fact)
+        session.delete(material)
+    if object_key:
+        storage.delete_object(object_key)
+    return {"ok": True}
+
+
+@router.get("/profile/facts")
+def list_profile_facts(
+    status: str = Query(default="pending"), current: CurrentUser = CurrentUserDep
+) -> list[dict]:
+    if status not in {"pending", "confirmed", "rejected"}:
+        raise HTTPException(status_code=422, detail="无效的事实状态")
+    with session_scope() as session:
+        facts = session.scalars(
+            select(ProfileFact)
+            .where(ProfileFact.tenant_id == current.tenant_id, ProfileFact.status == status)
+            .order_by(ProfileFact.id.desc())
+        ).all()
+        out = []
+        for fact in facts:
+            evidence = session.execute(
+                select(ProfileEvidence, ProfileMaterial)
+                .join(ProfileMaterial, ProfileMaterial.id == ProfileEvidence.material_id)
+                .where(ProfileEvidence.fact_id == fact.id)
+            ).first()
+            ev, material = evidence if evidence else (None, None)
+            out.append(
+                {
+                    "id": fact.id,
+                    "fact_type": fact.fact_type,
+                    "value": fact.value,
+                    "confidence": fact.confidence,
+                    "source_strength": fact.source_strength,
+                    "status": fact.status,
+                    "evidence": {
+                        "material_id": material.id,
+                        "filename": material.filename,
+                        "page": ev.page,
+                        "quote": ev.quote,
+                    } if ev and material else None,
+                    "created_at": fact.created_at,
+                }
+            )
+        return out
+
+
+class ProfileFactConfirmIn(BaseModel):
+    value: dict | None = None
+
+
+@router.post("/profile/facts/{fact_id}/confirm")
+def confirm_profile_fact(
+    fact_id: int, body: ProfileFactConfirmIn, current: CurrentUser = CurrentUserDep
+) -> dict:
+    with session_scope() as session:
+        fact = session.get(ProfileFact, fact_id)
+        if fact is None or fact.tenant_id != current.tenant_id:
+            raise HTTPException(status_code=404, detail="候选事实不存在")
+        if fact.status != "pending":
+            raise HTTPException(status_code=409, detail="该事实已经处理")
+        try:
+            value = ProjectCaseValue.model_validate(body.value or fact.value).model_dump()
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail="案例字段不完整或格式错误") from exc
+        if value["company_role"] not in {"winner", "supplier", "consortium_member"}:
+            raise HTTPException(
+                status_code=422,
+                detail="只有中标人、成交供应商或联合体成员可以确认为正式案例，请先修正企业角色",
+            )
+        fact.value = value
+        fact.status = "confirmed"
+        fact.confirmed_by = current.user_id
+        fact.confirmed_at = datetime.now(UTC)
+        project_confirmed_case(session, fact, value)
+    return {"ok": True, "rematch": _queue_profile_rematch(current.tenant_id)}
+
+
+@router.post("/profile/facts/{fact_id}/reject")
+def reject_profile_fact(fact_id: int, current: CurrentUser = CurrentUserDep) -> dict:
+    with session_scope() as session:
+        fact = session.get(ProfileFact, fact_id)
+        if fact is None or fact.tenant_id != current.tenant_id:
+            raise HTTPException(status_code=404, detail="候选事实不存在")
+        if fact.status != "pending":
+            raise HTTPException(status_code=409, detail="该事实已经处理")
+        fact.status = "rejected"
+        fact.confirmed_by = current.user_id
+        fact.confirmed_at = datetime.now(UTC)
+    return {"ok": True}
 
 
 DEFAULT_CHANNELS = {

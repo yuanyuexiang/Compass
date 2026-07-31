@@ -37,3 +37,21 @@ def put_bytes(key: str, data: bytes, content_type: str = "application/octet-stre
     except Exception as exc:
         logger.warning("MinIO 上传失败 key=%s: %s", key, exc)
         return None
+
+
+def get_bytes(key: str) -> bytes:
+    """读取对象；画像材料重试解析等需要原件时使用。"""
+    response = get_client().get_object(settings.minio_bucket, key)
+    try:
+        return response.read()
+    finally:
+        response.close()
+        response.release_conn()
+
+
+def delete_object(key: str) -> None:
+    """删除对象；失败记录日志但不阻塞数据库侧删除。"""
+    try:
+        get_client().remove_object(settings.minio_bucket, key)
+    except Exception as exc:
+        logger.warning("MinIO 删除失败 key=%s: %s", key, exc)

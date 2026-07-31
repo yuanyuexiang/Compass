@@ -21,6 +21,7 @@ import {
 } from 'antd';
 import { EditOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
+import ProfileEvidencePanel from '@/components/ProfileEvidencePanel';
 import { apiFetch } from '@/lib/api';
 import { formatDateTime } from '@/lib/labels';
 import type { ProfileData, ProfileSuggestResult } from '@/lib/types';
@@ -403,6 +404,15 @@ export default function ProfilePage() {
             <Skeleton active paragraph={{ rows: 4 }} />
           </Card>
         </Space>
+      ) : null}
+      {!loading ? (
+        <ProfileEvidencePanel
+          onProfileChanged={async () => {
+            const data = normalizeProfile(await apiFetch<ProfileData>('/api/profile'));
+            setProfileData(data);
+            form.setFieldsValue(data);
+          }}
+        />
       ) : null}
       {/* 查看态：当前生效画像的只读展示 */}
       {!loading && mode === 'view' && profileData ? (

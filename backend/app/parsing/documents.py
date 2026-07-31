@@ -49,5 +49,7 @@ def parse_attachment(filename: str, data: bytes) -> tuple[str, bool]:
         return pdf_to_text(data)
     if lower.endswith(".docx"):
         return docx_to_text(data), False
+    if lower.endswith(".txt"):
+        return data.decode("utf-8", errors="replace"), False
     # .doc 老格式需 LibreOffice 转换（M1 遗留项）；其余类型暂不解析
     return "", False
