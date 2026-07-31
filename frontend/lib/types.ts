@@ -94,6 +94,13 @@ export interface Recommendation {
   advice: Advice;
   reasons: Reason[];
   risks: Partial<Record<RiskKey, RiskItem>>;
+  score_details?: {
+    dimensions?: Record<string, { score: number; evidence?: string | null; note?: string }>;
+    fit_level?: 'high' | 'medium' | 'partial' | 'none';
+    qualification_status?: 'satisfied' | 'unknown' | 'missing';
+    delivery_mode?: 'independent' | 'partner' | 'unsuitable';
+    vector_similarity?: number | null;
+  };
   summary: string | null;
   follow_status: FollowStatus;
   created_at: string;

@@ -1,9 +1,16 @@
 """匹配引擎单测：预算解析、规则过滤、评分卡宽容校验（LLM 精排实测见 scripts/dev_match.py）。"""
 
 import json
+from types import SimpleNamespace
 
-from app.matching.engine import parse_budget_yuan, rule_filter
-from app.matching.schemas import RISK_KEYS, MatchScoreCard
+from app.matching import engine
+from app.matching.engine import (
+    finalize_assessment,
+    parse_budget_yuan,
+    rule_filter,
+    select_relevant_excerpt,
+)
+from app.matching.schemas import RISK_KEYS, MatchAssessment, MatchScoreCard
 
 
 class FakeProject:
@@ -98,3 +105,78 @@ def test_rule_filter_region_suffix_variants():
     assert ok
     ok, reason = rule_filter(FakeProject(region="湖南省/长沙市"), profile)
     assert not ok and "区域" in reason
+
+
+def _assessment(**overrides) -> MatchAssessment:
+    raw = {
+        "dimensions": {
+            "business_fit": {"score": 34, "evidence": "核心业务"},
+            "case_evidence": {"score": 18, "evidence": "同类案例"},
+            "product_service": {"score": 14},
+            "qualification": {"score": 10, "note": "部分资质待确认"},
+            "delivery_region": {"score": 5},
+            "commercial_preference": {"score": 9},
+        },
+        "fit_level": "high",
+        "qualification_status": "unknown",
+        "delivery_mode": "independent",
+        "reasons": [],
+        "risks": {},
+    }
+    raw.update(overrides)
+    return MatchAssessment.model_validate(raw)
+
+
+def test_finalize_assessment_calculates_score_and_advice():
+    card = finalize_assessment(_assessment(), similarity=0.21)
+    assert card.match_score == 90
+    assert card.star == 5
+    assert card.advice == "建议参与"
+    assert card.vector_similarity == 0.21
+    # 画像未列出资质只表示未知，不应自动封顶。
+    assert card.qualification_status == "unknown"
+
+
+def test_finalize_assessment_applies_business_caps():
+    partner = finalize_assessment(_assessment(delivery_mode="partner"))
+    assert partner.match_score == 79
+    assert partner.star == 3
+    assert partner.advice == "谨慎参与"
+
+    partial = finalize_assessment(_assessment(fit_level="partial"))
+    assert partial.match_score == 49
+    assert partial.advice == "不建议参与"
+
+    missing = finalize_assessment(_assessment(qualification_status="missing"))
+    assert missing.match_score == 49
+
+
+def test_finalize_assessment_clamps_dimension_scores():
+    assessment = _assessment()
+    assessment.dimensions["business_fit"].score = 100
+    card = finalize_assessment(assessment)
+    assert card.match_score == 91  # business_fit 按 35 分上限，而不是模型给出的 100
+
+
+def test_select_relevant_excerpt_finds_late_qualification_section():
+    text = "\n".join(
+        ["项目概况", "普通开场内容"]
+        + [f"无关内容{i}" for i in range(30)]
+        + ["申请人的资格要求", "须具备电子与智能化工程专业承包二级", "下一章节"]
+    )
+    excerpt = select_relevant_excerpt(text, max_chars=300)
+    assert "项目概况" in excerpt
+    assert "电子与智能化工程专业承包二级" in excerpt
+    assert len(excerpt) <= 300
+
+
+def test_llm_rerank_accepts_fenced_json_and_computes_total(monkeypatch):
+    payload = _assessment().model_dump(mode="json")
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=f"```json\n{json.dumps(payload)}\n```"))]
+    )
+    monkeypatch.setattr(engine, "extract_completion", lambda **kwargs: response)
+    card = engine.llm_rerank("input", similarity=0.42)
+    assert card.match_score == 90
+    assert card.star == 5
+    assert card.vector_similarity == 0.42

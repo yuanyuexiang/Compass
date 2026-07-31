@@ -65,6 +65,15 @@ const ADVICE_TAG: Record<Advice, { color: string; icon: ReactNode }> = {
   不建议参与: { color: 'error', icon: <CloseCircleOutlined /> },
 };
 
+const DIMENSION_LABELS: Record<string, string> = {
+  business_fit: '主体业务',
+  case_evidence: '案例证明',
+  product_service: '产品服务',
+  qualification: '资质准入',
+  delivery_region: '地区履约',
+  commercial_preference: '经营偏好',
+};
+
 /** 「今日重点」入选门槛：高星（≥4）且 AI 建议参与，最多展示前 HERO_MAX 条，其余降级为速览行 */
 const HERO_MIN_STAR = 4;
 const HERO_MAX = 3;
@@ -211,6 +220,19 @@ function RecommendationCard({
                 </div>
               ))}
             </div>
+          ) : null}
+          {rec.score_details?.dimensions ? (
+            <Space size={[6, 6]} wrap style={{ marginBottom: 10 }}>
+              {Object.entries(rec.score_details.dimensions).map(([key, value]) => (
+                <Tooltip key={key} title={value.evidence || value.note || '暂无证据说明'}>
+                  <Tag>
+                    {DIMENSION_LABELS[key] ?? key} {value.score}
+                  </Tag>
+                </Tooltip>
+              ))}
+              {rec.score_details.delivery_mode === 'partner' ? <Tag color="gold">需合作参与</Tag> : null}
+              {rec.score_details.qualification_status === 'unknown' ? <Tag>资质待确认</Tag> : null}
+            </Space>
           ) : null}
           {hitRisks.length ? (
             <Space size={[6, 6]} wrap>

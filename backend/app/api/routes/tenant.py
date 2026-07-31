@@ -76,6 +76,7 @@ def recommendations(
                     "advice": match.advice,
                     "reasons": match.reasons,
                     "risks": match.risks,
+                    "score_details": match.score_details,
                     "summary": project.summary,
                     "follow_status": match.follow_status,
                     "created_at": match.created_at,

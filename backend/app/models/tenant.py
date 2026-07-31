@@ -90,6 +90,8 @@ class MatchResult(Base):
     advice: Mapped[str] = mapped_column(String(16))  # 建议参与/谨慎参与/不建议参与
     reasons: Mapped[list] = mapped_column(JSONB, default=list)
     risks: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # 多维评分、能力封顶原因和向量相似度；保留 JSONB 便于评分版本继续演进。
+    score_details: Mapped[dict] = mapped_column(JSONB, default=dict)
     follow_status: Mapped[str] = mapped_column(String(16), default="待看")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

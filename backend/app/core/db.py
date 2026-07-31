@@ -41,6 +41,8 @@ MIGRATIONS = [
     "ALTER TABLE sources ADD COLUMN IF NOT EXISTS created_by_tenant_id BIGINT",
     "ALTER TABLE sources ADD COLUMN IF NOT EXISTS reject_reason TEXT",
     "ALTER TABLE announcements ADD COLUMN IF NOT EXISTS biddable BOOLEAN",
+    "ALTER TABLE match_results ADD COLUMN IF NOT EXISTS score_details JSONB "
+    "NOT NULL DEFAULT '{}'::jsonb",
     # 存量清洗（幂等）：注册时首尾空格（含全角）入库导致登录失败；已有同名去空格行则跳过防撞唯一键
     "UPDATE users SET username = btrim(username, ' 　') "
     "WHERE username <> btrim(username, ' 　') "
