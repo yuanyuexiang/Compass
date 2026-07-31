@@ -5,20 +5,19 @@ import {
   Alert,
   App,
   Button,
-  Badge,
   Card,
   Col,
   Form,
   Input,
   InputNumber,
   Modal,
+  Menu,
   Progress,
   Row,
   Select,
   Skeleton,
   Space,
   Tag,
-  Tabs,
   Typography,
 } from 'antd';
 import {
@@ -445,66 +444,88 @@ export default function ProfilePage() {
           </Card>
         </Space>
       ) : null}
-      {!loading && profileData ? (
-        <Card className="compass-card" style={{ marginBottom: 16 }}>
-          <Row gutter={[20, 16]} align="middle" justify="space-between">
-            <Col flex="auto">
-              <Space direction="vertical" size={7}>
-                <Space size={10} wrap>
-                  <Typography.Title level={4} style={{ margin: 0 }}>{profileData.name || '企业能力画像'}</Typography.Title>
-                  <Tag color="green">当前生效</Tag>
-                </Space>
-                <Space size={14} wrap>
-                  <Typography.Text type="secondary">
-                    画像完成度 {profileCompleteness(profileData).percent}%
-                  </Typography.Text>
-                  <Progress
-                    percent={profileCompleteness(profileData).percent}
-                    showInfo={false}
-                    size="small"
-                    style={{ width: 120, margin: 0 }}
-                  />
-                  <Typography.Text type="secondary">{evidenceCounts.materials} 份企业材料</Typography.Text>
-                  {profileData.updated_at ? (
-                    <Typography.Text type="secondary">更新于 {formatDateTime(profileData.updated_at)}</Typography.Text>
-                  ) : null}
-                </Space>
-              </Space>
-            </Col>
-            <Col>
-              <Space wrap>
-                <Button icon={<EditOutlined />} onClick={enterEdit}>直接编辑</Button>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setImproveOpen(true)}>完善画像</Button>
-              </Space>
-            </Col>
-          </Row>
-          {evidenceCounts.pending > 0 ? (
-            <Alert
-              type="info"
-              showIcon
-              style={{ marginTop: 16 }}
-              message={`AI 已从企业材料中发现 ${evidenceCounts.pending} 条能力信息，确认后才会写入画像`}
-              action={<Button size="small" type="link" onClick={() => setActiveTab('review')}>立即核对</Button>}
-            />
-          ) : null}
-        </Card>
-      ) : null}
       {!loading ? (
-        <Tabs
-          activeKey={activeTab}
-          onChange={(key) => setActiveTab(key as typeof activeTab)}
-          style={{ marginBottom: 16 }}
-          items={[
-            { key: 'profile', label: '当前画像', icon: <FileSearchOutlined /> },
-            {
-              key: 'review',
-              label: <Space size={6}>待确认建议{evidenceCounts.pending ? <Badge count={evidenceCounts.pending} size="small" /> : null}</Space>,
-              icon: <RobotOutlined />,
-            },
-            { key: 'materials', label: `企业资料库${evidenceCounts.materials ? `（${evidenceCounts.materials}）` : ''}`, icon: <FolderOpenOutlined /> },
-          ]}
-        />
-      ) : null}
+        <Row gutter={[16, 16]} align="stretch">
+          <Col xs={24} lg={6} xl={5}>
+            <Card
+              className="compass-card"
+              styles={{ body: { padding: 0, overflow: 'hidden' } }}
+              style={{ height: '100%' }}
+            >
+              <div style={{ padding: 20, borderBottom: '1px solid #f0f0f0' }}>
+                <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                  <Space size={8} wrap>
+                    <Typography.Text strong style={{ fontSize: 16 }}>
+                      {profileData?.name || '企业能力画像'}
+                    </Typography.Text>
+                    <Tag color="green">生效中</Tag>
+                  </Space>
+                  {profileData ? (
+                    <>
+                      <div>
+                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>画像完成度</Typography.Text>
+                          <Typography.Text strong style={{ fontSize: 12 }}>{profileCompleteness(profileData).percent}%</Typography.Text>
+                        </Space>
+                        <Progress percent={profileCompleteness(profileData).percent} showInfo={false} size="small" />
+                      </div>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {profileData.updated_at ? `更新于 ${formatDateTime(profileData.updated_at)}` : '尚未保存画像'}
+                      </Typography.Text>
+                    </>
+                  ) : null}
+                  <Button type="primary" block icon={<PlusOutlined />} onClick={() => setImproveOpen(true)}>
+                    完善画像
+                  </Button>
+                </Space>
+              </div>
+              <Menu
+                mode="inline"
+                selectedKeys={[activeTab]}
+                onClick={({ key }) => setActiveTab(key as typeof activeTab)}
+                style={{ borderInlineEnd: 0, padding: '8px 0' }}
+                items={[
+                  { key: 'profile', icon: <FileSearchOutlined />, label: '当前画像' },
+                  {
+                    key: 'review',
+                    icon: <RobotOutlined />,
+                    label: (
+                      <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>待确认建议</span>
+                        {evidenceCounts.pending ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{evidenceCounts.pending}</Tag> : null}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'materials',
+                    icon: <FolderOpenOutlined />,
+                    label: (
+                      <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>企业资料库</span>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{evidenceCounts.materials}</Typography.Text>
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+              <div style={{ padding: '12px 20px 18px', borderTop: '1px solid #f5f5f5' }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
+                  已确认的信息才参与商机匹配，材料原件不会直接改变画像。
+                </Typography.Text>
+              </div>
+            </Card>
+          </Col>
+          <Col xs={24} lg={18} xl={19}>
+            {evidenceCounts.pending > 0 && activeTab === 'profile' ? (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={`有 ${evidenceCounts.pending} 条 AI 建议等待核对`}
+                description="确认后的能力和案例才会进入正式画像并参与商机匹配。"
+                action={<Button size="small" type="link" onClick={() => setActiveTab('review')}>立即核对</Button>}
+              />
+            ) : null}
       {!loading && activeTab !== 'profile' ? (
         <ProfileEvidencePanel
           section={activeTab === 'review' ? 'review' : 'materials'}
@@ -753,6 +774,9 @@ export default function ProfilePage() {
           </Space>
         </Form>
       </div>
+          </Col>
+        </Row>
+      ) : null}
 
       <Modal
         title="选择完善画像的方式"
