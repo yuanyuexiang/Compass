@@ -56,8 +56,12 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function ProfileEvidencePanel({
   onProfileChanged,
+  section = 'all',
+  onCountsChange,
 }: {
   onProfileChanged: () => void | Promise<void>;
+  section?: 'all' | 'review' | 'materials';
+  onCountsChange?: (counts: { pending: number; materials: number }) => void;
 }) {
   const { message } = App.useApp();
   const [materials, setMaterials] = useState<ProfileMaterialItem[]>([]);
@@ -76,12 +80,13 @@ export default function ProfileEvidencePanel({
       ]);
       setMaterials(materialRows);
       setFacts(factRows);
+      onCountsChange?.({ pending: factRows.length, materials: materialRows.length });
     } catch (error) {
       message.error((error as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [message]);
+  }, [message, onCountsChange]);
 
   useEffect(() => {
     void load();
@@ -165,9 +170,9 @@ export default function ProfileEvidencePanel({
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%', marginBottom: 16 }}>
-      <Card
+      {section !== 'review' ? <Card
         className="compass-card"
-        title={<span><InboxOutlined style={{ marginRight: 6 }} />画像材料</span>}
+        title={<span><InboxOutlined style={{ marginRight: 6 }} />企业资料库</span>}
       >
         <Alert
           type="info"
@@ -245,11 +250,11 @@ export default function ProfileEvidencePanel({
             );
           }}
         />
-      </Card>
+      </Card> : null}
 
-      <Card
+      {section !== 'materials' ? <Card
         className="compass-card"
-        title={<span><FileSearchOutlined style={{ marginRight: 6 }} />AI 待确认</span>}
+        title={<span><FileSearchOutlined style={{ marginRight: 6 }} />待确认建议</span>}
         extra={<Tag color={facts.length ? 'processing' : 'default'}>{facts.length} 条</Tag>}
       >
         {facts.length ? (
@@ -300,51 +305,67 @@ export default function ProfileEvidencePanel({
         ) : (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无待确认的 AI 候选事实" />
         )}
-      </Card>
+      </Card> : null}
 
       <Modal
-        title="核对项目案例"
+        title="核对 AI 识别结果"
         open={!!editing}
         onOk={() => void confirmFact()}
         onCancel={() => setEditing(null)}
         confirmLoading={confirming}
-        okText="确认并写入画像"
-        width={720}
+        okText="确认并写入当前画像"
+        width={920}
       >
-        {editing?.evidence ? (
-          <Alert
-            type="info"
-            showIcon
-            message={`${editing.evidence.filename}${editing.evidence.page ? ` · 第${editing.evidence.page}页` : ''}`}
-            description={`原文：“${editing.evidence.quote}”`}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
-        <Form form={caseForm} layout="vertical">
-          <Form.Item name="project_name" label="项目名称" rules={[{ required: true, message: '请填写项目名称' }]}>
-            <Input />
-          </Form.Item>
-          <Row gutter={16}>
-            <Col xs={24} md={12}>
-              <Form.Item name="company_role" label="企业角色" rules={[{ required: true }]}>
-                <Select options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))} />
+        <Row gutter={[24, 16]}>
+          <Col xs={24} md={9}>
+            <Typography.Text strong>材料原文</Typography.Text>
+            {editing?.evidence ? (
+              <div style={{ marginTop: 10, padding: 16, background: '#f7f8fa', borderRadius: 8, minHeight: 230 }}>
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <Space wrap>
+                    <FileSearchOutlined style={{ color: '#2F54EB' }} />
+                    <Typography.Text>{editing.evidence.filename}</Typography.Text>
+                    {editing.evidence.page ? <Tag>第 {editing.evidence.page} 页</Tag> : null}
+                  </Space>
+                  <Typography.Paragraph style={{ margin: 0, lineHeight: 1.8 }}>
+                    “{editing.evidence.quote}”
+                  </Typography.Paragraph>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    右侧内容由 AI 从这段原文提取，请重点核对企业角色、金额和项目名称。
+                  </Typography.Text>
+                </Space>
+              </div>
+            ) : <Alert type="warning" message="这条建议没有可展示的原文证据" />}
+          </Col>
+          <Col xs={24} md={15}>
+            <Typography.Text strong>将写入画像的内容</Typography.Text>
+            <Form form={caseForm} layout="vertical" style={{ marginTop: 10 }}>
+              <Form.Item name="project_name" label="项目名称" rules={[{ required: true, message: '请填写项目名称' }]}>
+                <Input />
               </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item name="amount_yuan" label="项目金额（元）">
-                <InputNumber min={0} style={{ width: '100%' }} />
+              <Row gutter={16}>
+                <Col xs={24} md={12}>
+                  <Form.Item name="company_role" label="企业角色" rules={[{ required: true }]}>
+                    <Select options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Form.Item name="amount_yuan" label="项目金额（元）">
+                    <InputNumber min={0} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col xs={24} md={12}><Form.Item name="customer" label="采购人/建设单位"><Input /></Form.Item></Col>
+                <Col xs={24} md={12}><Form.Item name="region" label="项目地区"><Input /></Form.Item></Col>
+              </Row>
+              <Form.Item name="awarded_at" label="中标时间"><Input placeholder="YYYY-MM-DD 或 YYYY-MM" /></Form.Item>
+              <Form.Item name="services" label="明确交付范围">
+                <Select mode="tags" tokenSeparators={[',', '，', '、', ';', '；']} />
               </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col xs={24} md={12}><Form.Item name="customer" label="采购人/建设单位"><Input /></Form.Item></Col>
-            <Col xs={24} md={12}><Form.Item name="region" label="项目地区"><Input /></Form.Item></Col>
-          </Row>
-          <Form.Item name="awarded_at" label="中标时间"><Input placeholder="YYYY-MM-DD 或 YYYY-MM" /></Form.Item>
-          <Form.Item name="services" label="明确交付范围">
-            <Select mode="tags" tokenSeparators={[',', '，', '、', ';', '；']} />
-          </Form.Item>
-        </Form>
+            </Form>
+          </Col>
+        </Row>
       </Modal>
     </Space>
   );

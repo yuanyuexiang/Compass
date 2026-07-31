@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   App,
   Button,
+  Badge,
   Card,
   Col,
   Form,
@@ -17,14 +18,24 @@ import {
   Skeleton,
   Space,
   Tag,
+  Tabs,
   Typography,
 } from 'antd';
-import { EditOutlined, RobotOutlined, SaveOutlined } from '@ant-design/icons';
+import {
+  EditOutlined,
+  FileAddOutlined,
+  FileSearchOutlined,
+  FolderOpenOutlined,
+  GlobalOutlined,
+  PlusOutlined,
+  RobotOutlined,
+  SaveOutlined,
+} from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import ProfileEvidencePanel from '@/components/ProfileEvidencePanel';
 import { apiFetch } from '@/lib/api';
 import { formatDateTime } from '@/lib/labels';
-import type { ProfileData, ProfileSuggestResult } from '@/lib/types';
+import type { ProfileData, ProfileFactItem, ProfileMaterialItem, ProfileSuggestResult } from '@/lib/types';
 
 const CONFIDENCE_TAG: Record<string, { color: string; label: string }> = {
   high: { color: 'green', label: '可信度高' },
@@ -299,6 +310,13 @@ export default function ProfilePage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingPayload, setPendingPayload] = useState<ProfileData | null>(null);
   const [diffs, setDiffs] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'profile' | 'review' | 'materials'>('profile');
+  const [improveOpen, setImproveOpen] = useState(false);
+  const [evidenceCounts, setEvidenceCounts] = useState({ pending: 0, materials: 0 });
+  const handleEvidenceCounts = useCallback(
+    (counts: { pending: number; materials: number }) => setEvidenceCounts(counts),
+    []
+  );
 
   useEffect(() => {
     apiFetch<ProfileData>('/api/profile')
@@ -316,9 +334,31 @@ export default function ProfilePage() {
       .finally(() => setLoading(false));
   }, [form]);
 
+  useEffect(() => {
+    Promise.all([
+      apiFetch<ProfileMaterialItem[]>('/api/profile/materials'),
+      apiFetch<ProfileFactItem[]>('/api/profile/facts?status=pending'),
+    ]).then(([materials, facts]) => {
+      setEvidenceCounts({ materials: materials.length, pending: facts.length });
+    }).catch(() => {
+      // 主画像仍可正常使用；资料区打开时会再次加载并显示具体错误。
+    });
+  }, []);
+
   const enterEdit = () => {
     if (profileData) form.setFieldsValue(profileData);
+    setActiveTab('profile');
     setMode('edit');
+  };
+
+  const chooseImproveMethod = (method: 'upload' | 'public' | 'manual') => {
+    setImproveOpen(false);
+    if (method === 'upload') {
+      setActiveTab('materials');
+      return;
+    }
+    enterEdit();
+    if (method === 'public') window.setTimeout(() => document.getElementById('ai-profile-entry')?.scrollIntoView({ behavior: 'smooth' }), 50);
   };
 
   const cancelEdit = () => {
@@ -405,8 +445,70 @@ export default function ProfilePage() {
           </Card>
         </Space>
       ) : null}
+      {!loading && profileData ? (
+        <Card className="compass-card" style={{ marginBottom: 16 }}>
+          <Row gutter={[20, 16]} align="middle" justify="space-between">
+            <Col flex="auto">
+              <Space direction="vertical" size={7}>
+                <Space size={10} wrap>
+                  <Typography.Title level={4} style={{ margin: 0 }}>{profileData.name || '企业能力画像'}</Typography.Title>
+                  <Tag color="green">当前生效</Tag>
+                </Space>
+                <Space size={14} wrap>
+                  <Typography.Text type="secondary">
+                    画像完成度 {profileCompleteness(profileData).percent}%
+                  </Typography.Text>
+                  <Progress
+                    percent={profileCompleteness(profileData).percent}
+                    showInfo={false}
+                    size="small"
+                    style={{ width: 120, margin: 0 }}
+                  />
+                  <Typography.Text type="secondary">{evidenceCounts.materials} 份企业材料</Typography.Text>
+                  {profileData.updated_at ? (
+                    <Typography.Text type="secondary">更新于 {formatDateTime(profileData.updated_at)}</Typography.Text>
+                  ) : null}
+                </Space>
+              </Space>
+            </Col>
+            <Col>
+              <Space wrap>
+                <Button icon={<EditOutlined />} onClick={enterEdit}>直接编辑</Button>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setImproveOpen(true)}>完善画像</Button>
+              </Space>
+            </Col>
+          </Row>
+          {evidenceCounts.pending > 0 ? (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 16 }}
+              message={`AI 已从企业材料中发现 ${evidenceCounts.pending} 条能力信息，确认后才会写入画像`}
+              action={<Button size="small" type="link" onClick={() => setActiveTab('review')}>立即核对</Button>}
+            />
+          ) : null}
+        </Card>
+      ) : null}
       {!loading ? (
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key as typeof activeTab)}
+          style={{ marginBottom: 16 }}
+          items={[
+            { key: 'profile', label: '当前画像', icon: <FileSearchOutlined /> },
+            {
+              key: 'review',
+              label: <Space size={6}>待确认建议{evidenceCounts.pending ? <Badge count={evidenceCounts.pending} size="small" /> : null}</Space>,
+              icon: <RobotOutlined />,
+            },
+            { key: 'materials', label: `企业资料库${evidenceCounts.materials ? `（${evidenceCounts.materials}）` : ''}`, icon: <FolderOpenOutlined /> },
+          ]}
+        />
+      ) : null}
+      {!loading && activeTab !== 'profile' ? (
         <ProfileEvidencePanel
+          section={activeTab === 'review' ? 'review' : 'materials'}
+          onCountsChange={handleEvidenceCounts}
           onProfileChanged={async () => {
             const data = normalizeProfile(await apiFetch<ProfileData>('/api/profile'));
             setProfileData(data);
@@ -415,15 +517,13 @@ export default function ProfilePage() {
         />
       ) : null}
       {/* 查看态：当前生效画像的只读展示 */}
-      {!loading && mode === 'view' && profileData ? (
+      {!loading && activeTab === 'profile' && mode === 'view' && profileData ? (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Card
             className="compass-card"
             title="基本信息"
             extra={
-              <Button type="primary" icon={<EditOutlined />} onClick={enterEdit}>
-                编辑画像
-              </Button>
+              <Button icon={<EditOutlined />} onClick={enterEdit}>编辑画像</Button>
             }
           >
             <Typography.Title level={5} style={{ marginTop: 0 }}>
@@ -499,10 +599,10 @@ export default function ProfilePage() {
       ) : null}
 
       {/* 编辑态（Form 始终挂载避免 useForm 未连接警告；查看态下隐藏） */}
-      <div style={{ display: loading || mode === 'view' ? 'none' : undefined }}>
+      <div style={{ display: loading || activeTab !== 'profile' || mode === 'view' ? 'none' : undefined }}>
         <Form<ProfileData> form={form} layout="vertical" onFinish={onFinish}>
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Card className="compass-card" title={<span><RobotOutlined style={{ color: '#2F54EB', marginRight: 6 }} />AI 生成画像</span>}>
+            <Card id="ai-profile-entry" className="compass-card" title={<span><RobotOutlined style={{ color: '#2F54EB', marginRight: 6 }} />从公开信息补充画像</span>}>
               <Space.Compact style={{ width: '100%' }}>
                 <Input
                   placeholder="输入企业全称，AI 自动联网整理画像草稿"
@@ -653,6 +753,41 @@ export default function ProfilePage() {
           </Space>
         </Form>
       </div>
+
+      <Modal
+        title="选择完善画像的方式"
+        open={improveOpen}
+        onCancel={() => setImproveOpen(false)}
+        footer={null}
+        width={720}
+      >
+        <Typography.Paragraph type="secondary">
+          可以组合使用多种方式。来自材料和公开信息的 AI 建议都需要你确认后才会生效。
+        </Typography.Paragraph>
+        <Row gutter={[12, 12]}>
+          <Col xs={24} md={8}>
+            <Card hoverable onClick={() => chooseImproveMethod('upload')} style={{ height: '100%' }}>
+              <FileAddOutlined style={{ color: '#2F54EB', fontSize: 24 }} />
+              <Typography.Title level={5}>上传企业材料</Typography.Title>
+              <Typography.Text type="secondary">上传中标通知、成交公告等，AI 提取带原文证据的案例。</Typography.Text>
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
+            <Card hoverable onClick={() => chooseImproveMethod('public')} style={{ height: '100%' }}>
+              <GlobalOutlined style={{ color: '#2F54EB', fontSize: 24 }} />
+              <Typography.Title level={5}>从公开信息补充</Typography.Title>
+              <Typography.Text type="secondary">按企业名称检索公开网页，逐字段核对 AI 建议。</Typography.Text>
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
+            <Card hoverable onClick={() => chooseImproveMethod('manual')} style={{ height: '100%' }}>
+              <EditOutlined style={{ color: '#2F54EB', fontSize: 24 }} />
+              <Typography.Title level={5}>手动填写</Typography.Title>
+              <Typography.Text type="secondary">直接维护能力、行业、区域、资质与典型案例。</Typography.Text>
+            </Card>
+          </Col>
+        </Row>
+      </Modal>
 
       {/* AI 画像成果：逐字段「当前 vs 建议」，用户决定合并/替换/忽略后才应用到表单 */}
       <Modal
