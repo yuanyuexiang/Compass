@@ -26,6 +26,145 @@ a {
   transform: translateY(-2px);
 }
 
+/* ===== 企业画像 · 微信式任务侧栏 ===== */
+.profile-nav-card {
+  background: #fbfcff;
+  border: 1px solid rgba(47, 84, 235, 0.08) !important;
+  overflow: hidden;
+}
+
+.profile-nav-card:hover {
+  transform: none;
+  box-shadow:
+    0 1px 2px rgba(15, 27, 61, 0.04),
+    0 4px 16px rgba(15, 27, 61, 0.06);
+}
+
+.profile-nav-hero {
+  position: relative;
+  padding: 20px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(47, 84, 235, 0.08);
+  background:
+    radial-gradient(circle at 100% 0, rgba(110, 139, 255, 0.18), transparent 44%),
+    linear-gradient(145deg, #ffffff 0%, #f2f5ff 100%);
+}
+
+.profile-nav-hero::after {
+  content: '';
+  position: absolute;
+  width: 96px;
+  height: 96px;
+  right: -50px;
+  bottom: -58px;
+  border: 14px solid rgba(47, 84, 235, 0.04);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.profile-company-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-company-avatar {
+  flex-shrink: 0;
+  color: #fff !important;
+  background: linear-gradient(145deg, #2f54eb, #597ef7) !important;
+  box-shadow: 0 6px 16px rgba(47, 84, 235, 0.24);
+}
+
+.profile-company-name {
+  display: block;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: #52c41a;
+  box-shadow: 0 0 0 3px rgba(82, 196, 26, 0.12);
+}
+
+.profile-progress-box {
+  padding: 10px 12px 6px;
+  border: 1px solid rgba(47, 84, 235, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.profile-nav-menu {
+  background: transparent !important;
+}
+
+.profile-nav-menu .ant-menu-item {
+  height: 46px;
+  margin: 4px 10px;
+  padding-inline: 14px !important;
+  width: calc(100% - 20px);
+  border-radius: 10px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.profile-nav-menu .ant-menu-item::after {
+  display: none;
+}
+
+.profile-nav-menu .ant-menu-item .anticon {
+  font-size: 17px;
+  color: rgba(0, 0, 0, 0.42);
+}
+
+.profile-nav-menu .ant-menu-item:hover {
+  color: #2f54eb !important;
+  background: #f0f4ff !important;
+}
+
+.profile-nav-menu .ant-menu-item-selected {
+  color: #2f54eb !important;
+  font-weight: 600;
+  background: linear-gradient(90deg, #e9efff 0%, #f2f5ff 100%) !important;
+  box-shadow: inset 3px 0 0 #2f54eb;
+}
+
+.profile-nav-menu .ant-menu-item-selected .anticon {
+  color: #2f54eb;
+}
+
+.profile-nav-count {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 11px;
+  background: #eef0f5;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  line-height: 22px;
+  text-align: center;
+}
+
+.profile-nav-count-active {
+  color: #fff;
+  background: #2f54eb;
+  box-shadow: 0 3px 8px rgba(47, 84, 235, 0.24);
+}
+
+@media (min-width: 992px) {
+  .profile-nav-card {
+    position: sticky;
+    top: 72px;
+    min-height: calc(100vh - 104px);
+  }
+}
+
 /* ===== 侧边栏品牌导航 ===== */
 .compass-sider {
   background: linear-gradient(180deg, #0f1b3d 0%, #1d2e5c 100%) !important;

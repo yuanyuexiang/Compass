@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   App,
+  Avatar,
   Button,
   Card,
   Col,
@@ -26,6 +27,7 @@ import {
   FileSearchOutlined,
   FolderOpenOutlined,
   GlobalOutlined,
+  IdcardOutlined,
   PlusOutlined,
   RobotOutlined,
   SaveOutlined,
@@ -448,26 +450,33 @@ export default function ProfilePage() {
         <Row gutter={[16, 16]} align="stretch">
           <Col xs={24} lg={6} xl={5}>
             <Card
-              className="compass-card"
+              className="compass-card profile-nav-card"
               styles={{ body: { padding: 0, overflow: 'hidden' } }}
-              style={{ height: '100%' }}
             >
-              <div style={{ padding: 20, borderBottom: '1px solid #f0f0f0' }}>
+              <div className="profile-nav-hero">
                 <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                  <Space size={8} wrap>
-                    <Typography.Text strong style={{ fontSize: 16 }}>
-                      {profileData?.name || '企业能力画像'}
-                    </Typography.Text>
-                    <Tag color="green">生效中</Tag>
-                  </Space>
+                  <div className="profile-company-row">
+                    <Avatar
+                      shape="square"
+                      size={42}
+                      icon={<IdcardOutlined />}
+                      className="profile-company-avatar"
+                    />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <Typography.Text strong className="profile-company-name">
+                        {profileData?.name || '企业能力画像'}
+                      </Typography.Text>
+                      <div><span className="profile-live-dot" /> <Typography.Text type="secondary" style={{ fontSize: 12 }}>当前画像已生效</Typography.Text></div>
+                    </div>
+                  </div>
                   {profileData ? (
                     <>
-                      <div>
+                      <div className="profile-progress-box">
                         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                           <Typography.Text type="secondary" style={{ fontSize: 12 }}>画像完成度</Typography.Text>
-                          <Typography.Text strong style={{ fontSize: 12 }}>{profileCompleteness(profileData).percent}%</Typography.Text>
+                          <Typography.Text strong style={{ fontSize: 13, color: '#2f54eb' }}>{profileCompleteness(profileData).percent}%</Typography.Text>
                         </Space>
-                        <Progress percent={profileCompleteness(profileData).percent} showInfo={false} size="small" />
+                        <Progress percent={profileCompleteness(profileData).percent} showInfo={false} size="small" strokeColor={{ from: '#2f54eb', to: '#6e8bff' }} />
                       </div>
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                         {profileData.updated_at ? `更新于 ${formatDateTime(profileData.updated_at)}` : '尚未保存画像'}
@@ -480,6 +489,7 @@ export default function ProfilePage() {
                 </Space>
               </div>
               <Menu
+                className="profile-nav-menu"
                 mode="inline"
                 selectedKeys={[activeTab]}
                 onClick={({ key }) => setActiveTab(key as typeof activeTab)}
@@ -492,7 +502,7 @@ export default function ProfilePage() {
                     label: (
                       <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span>待确认建议</span>
-                        {evidenceCounts.pending ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{evidenceCounts.pending}</Tag> : null}
+                        {evidenceCounts.pending ? <span className="profile-nav-count profile-nav-count-active">{evidenceCounts.pending}</span> : null}
                       </span>
                     ),
                   },
@@ -502,7 +512,7 @@ export default function ProfilePage() {
                     label: (
                       <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span>企业资料库</span>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{evidenceCounts.materials}</Typography.Text>
+                        <span className="profile-nav-count">{evidenceCounts.materials}</span>
                       </span>
                     ),
                   },
