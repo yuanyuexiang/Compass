@@ -167,8 +167,8 @@ a {
 
 /* ===== 侧边栏品牌导航 ===== */
 .compass-sider {
-  background: linear-gradient(180deg, #08111f 0%, #0d1728 100%) !important;
-  border-right: 1px solid rgba(111, 197, 255, 0.14);
+  background: linear-gradient(180deg, #111a2e 0%, #16213a 100%) !important;
+  border-right: 1px solid rgba(47, 84, 235, 0.2);
 }
 
 .sider-inner {
@@ -183,9 +183,8 @@ a {
   justify-content: center;
   height: 68px;
   flex-shrink: 0;
-  color: #24c7ec;
+  color: #6f8cff;
   font-size: 30px;
-  text-shadow: 0 0 18px rgba(36, 199, 236, 0.35);
 }
 
 .rail-nav {
@@ -214,7 +213,7 @@ a {
   gap: 5px;
   box-sizing: border-box;
   border-radius: 8px;
-  color: #8998b4;
+  color: #8e9bb5;
   text-decoration: none;
   transition: color 0.16s ease, background 0.16s ease;
 }
@@ -231,18 +230,17 @@ a {
 }
 
 .rail-item:hover {
-  color: #c7d4e9;
-  background: rgba(36, 199, 236, 0.07);
+  color: #b7c4dc;
+  background: rgba(47, 84, 235, 0.12);
 }
 
 .rail-item-active {
-  color: #26c9ee;
-  background: rgba(36, 199, 236, 0.13);
+  color: #6f8cff;
+  background: rgba(47, 84, 235, 0.2);
 }
 
 .rail-item-active::before {
-  background: #26c9ee;
-  box-shadow: 0 0 9px rgba(38, 201, 238, 0.65);
+  background: #2f54eb;
 }
 
 .rail-item-icon {
