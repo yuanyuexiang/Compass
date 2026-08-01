@@ -395,6 +395,97 @@ a {
   background: #f7f9ff;
 }
 
+/* ===== 商机查询 · 列表 / 详情双面板 ===== */
+.opportunity-list-card:hover,
+.opportunity-detail:hover {
+  transform: none;
+}
+
+.opportunity-list-card .ant-card-body {
+  padding: 14px;
+}
+
+.opportunity-list-item {
+  position: relative;
+  margin-bottom: 6px;
+  padding: 13px 13px 13px 16px !important;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.opportunity-list-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 3px;
+  background: transparent;
+}
+
+.opportunity-list-item:hover {
+  background: #f7f9ff;
+  border-color: #e7ecfa;
+}
+
+.opportunity-list-item-active {
+  background: linear-gradient(90deg, #edf3ff, #f7f9ff);
+  border-color: #d9e4ff;
+}
+
+.opportunity-list-item-active::before {
+  background: #2f54eb;
+}
+
+.opportunity-list-title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.82);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.opportunity-field {
+  height: 100%;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border: 1px solid #f0f2f7;
+  border-radius: 9px;
+  background: #fafbfd;
+}
+
+.opportunity-field-value {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: rgba(0, 0, 0, 0.82);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.opportunity-clean-text {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+  color: rgba(0, 0, 0, 0.65);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+@media (min-width: 992px) {
+  .opportunity-detail {
+    position: sticky;
+    top: 72px;
+  }
+}
+
 /* ===== 流水线分段条 ===== */
 .pipeline-bar {
   display: flex;

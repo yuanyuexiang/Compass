@@ -1,13 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Alert, Button, Card, Empty, Input, Skeleton, Space, Switch, Table, Tag, Typography } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import { CloseOutlined, EnvironmentOutlined, RobotOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Empty, Input, List, Pagination, Row, Skeleton, Space, Switch, Tag, Typography } from 'antd';
+import { CalendarOutlined, CloseOutlined, EnvironmentOutlined, RobotOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
+import OpportunityDetailPanel from '@/components/OpportunityDetailPanel';
 import { apiFetch } from '@/lib/api';
-import { formatDateTime, pipelineStatusLabel } from '@/lib/labels';
+import { formatDateTime } from '@/lib/labels';
 import type { AnnouncementItem, AnnouncementList, NlSearchResult } from '@/lib/types';
 
 const PAGE_SIZE = 10;
@@ -35,7 +34,6 @@ function readSavedState(): SavedState {
 }
 
 export default function OpportunitiesPage() {
-  const router = useRouter();
   const [keyword, setKeyword] = useState('');
   const [region, setRegion] = useState('');
   const [page, setPage] = useState(1);
@@ -44,6 +42,7 @@ export default function OpportunitiesPage() {
   const [loading, setLoading] = useState(false);
   const [firstLoad, setFirstLoad] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | string | null>(null);
 
   const [nlQuery, setNlQuery] = useState('');
   const [nlLoading, setNlLoading] = useState(false);
@@ -186,49 +185,17 @@ export default function OpportunitiesPage() {
     }
   };
 
-  const columns: ColumnsType<AnnouncementItem> = [
-    {
-      title: '公告标题',
-      dataIndex: 'title',
-      key: 'title',
-      ellipsis: true,
-      render: (title: string) => (
-        <Typography.Text strong style={{ color: '#2F54EB' }}>
-          {title}
-        </Typography.Text>
-      ),
-    },
-    {
-      title: '类型',
-      dataIndex: 'ann_type',
-      key: 'ann_type',
-      width: 150,
-      render: (t: string | null) => (t ? <Tag>{t}</Tag> : '-'),
-    },
-    { title: '地区', dataIndex: 'region', key: 'region', width: 110, render: (v: string | null) => v ?? '-' },
-    {
-      title: '采购单位',
-      dataIndex: 'buyer',
-      key: 'buyer',
-      width: 200,
-      ellipsis: true,
-      render: (v: string | null) => v ?? '-',
-    },
-    {
-      title: '发布时间',
-      dataIndex: 'publish_time',
-      key: 'publish_time',
-      width: 150,
-      render: (v: string | null) => formatDateTime(v),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 110,
-      render: (s: string | null) => (s ? <Tag color="geekblue">{pipelineStatusLabel(s)}</Tag> : '-'),
-    },
-  ];
+  const displayItems = nlResult ? nlResult.items : items;
+
+  useEffect(() => {
+    if (!displayItems.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (!displayItems.some((item) => String(item.id) === String(selectedId))) {
+      setSelectedId(displayItems[0].id);
+    }
+  }, [displayItems, selectedId]);
 
   return (
     <AppLayout title="商机查询" subtitle="关键词精确筛选，或让 AI 理解你的一句话需求">
@@ -326,72 +293,88 @@ export default function OpportunitiesPage() {
           </Typography.Text>
         </div>
 
-        <Card
-          className="compass-card"
-          title={nlResult ? 'AI 搜索结果' : '公告列表'}
-          extra={
-            nlResult ? null : (
-              <Space>
-                <Input
-                  placeholder="关键词"
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                  onPressEnter={doSearch}
-                  style={{ width: 200 }}
-                  allowClear
-                />
-                <Input
-                  placeholder="地区"
-                  value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                  onPressEnter={doSearch}
-                  style={{ width: 140 }}
-                  allowClear
-                />
-                <Button type="primary" onClick={doSearch}>
-                  查询
-                </Button>
-              </Space>
-            )
-          }
-        >
-          {error ? <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} /> : null}
-          {firstLoad && loading ? (
-            <Skeleton active paragraph={{ rows: 6 }} />
-          ) : (
-            <Table<AnnouncementItem>
-              size="middle"
-              rowKey={(r) => String(r.id)}
-              columns={columns}
-              loading={loading || nlLoading}
-              dataSource={nlResult ? nlResult.items : items}
-              locale={{
-                emptyText: (
-                  <Empty description="暂无公告数据，采集任务运行后将自动入库" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                ),
-              }}
-              onRow={(record) => ({
-                onClick: () => router.push(`/projects/${record.id}`),
-                style: { cursor: 'pointer' },
-              })}
-              pagination={
-                nlResult
-                  ? { pageSize: PAGE_SIZE, showSizeChanger: false }
-                  : {
-                      current: page,
-                      pageSize: PAGE_SIZE,
-                      total,
-                      showSizeChanger: false,
-                      showTotal: (t) => `共 ${t} 条`,
-                      onChange: (p) => {
-                        setPage(p);
-                        load(p, keyword, region, onlyMyRegion, includeResults);
-                      },
-                    }
-              }
-            />
-          )}
-        </Card>
+        <Row gutter={[16, 16]} align="top">
+          <Col xs={24} lg={9} xl={8}>
+            <Card
+              className="compass-card opportunity-list-card"
+              title={nlResult ? `AI 搜索结果（${nlResult.total}）` : `商机列表（${total}）`}
+            >
+              {!nlResult ? (
+                <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
+                  <Input
+                    placeholder="关键词"
+                    value={keyword}
+                    onChange={(e) => setKeyword(e.target.value)}
+                    onPressEnter={doSearch}
+                    allowClear
+                  />
+                  <Input
+                    placeholder="地区"
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                    onPressEnter={doSearch}
+                    style={{ maxWidth: 105 }}
+                    allowClear
+                  />
+                  <Button type="primary" onClick={doSearch}>查询</Button>
+                </Space.Compact>
+              ) : null}
+              {error ? <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} /> : null}
+              {firstLoad && loading ? (
+                <Skeleton active paragraph={{ rows: 10 }} />
+              ) : displayItems.length ? (
+                <>
+                  <List<AnnouncementItem>
+                    loading={loading || nlLoading}
+                    dataSource={displayItems}
+                    split={false}
+                    renderItem={(item) => {
+                      const selected = String(item.id) === String(selectedId);
+                      return (
+                        <List.Item
+                          className={`opportunity-list-item${selected ? ' opportunity-list-item-active' : ''}`}
+                          onClick={() => setSelectedId(item.id)}
+                        >
+                          <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                            <Typography.Text strong className="opportunity-list-title">{item.title}</Typography.Text>
+                            <Space size={[5, 5]} wrap>
+                              {item.ann_type ? <Tag style={{ margin: 0 }}>{item.ann_type}</Tag> : null}
+                              {item.region ? <Tag color="blue" style={{ margin: 0 }}>{item.region}</Tag> : null}
+                            </Space>
+                            <Typography.Text type="secondary" ellipsis style={{ maxWidth: '100%', fontSize: 12 }}>
+                              {item.buyer || '采购单位未提取'}
+                            </Typography.Text>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              <CalendarOutlined style={{ marginRight: 5 }} />{formatDateTime(item.publish_time)}
+                            </Typography.Text>
+                          </Space>
+                        </List.Item>
+                      );
+                    }}
+                  />
+                  {!nlResult ? <div style={{ paddingTop: 12, textAlign: 'center' }}>
+                    <Pagination
+                      size="small"
+                      current={page}
+                      pageSize={PAGE_SIZE}
+                      total={total}
+                      showSizeChanger={false}
+                      onChange={(nextPage) => {
+                        setPage(nextPage);
+                        load(nextPage, keyword, region, onlyMyRegion, includeResults);
+                      }}
+                    />
+                  </div> : null}
+                </>
+              ) : (
+                <Empty description="暂无公告数据，采集任务运行后将自动入库" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </Card>
+          </Col>
+          <Col xs={24} lg={15} xl={16}>
+            <OpportunityDetailPanel id={selectedId} />
+          </Col>
+        </Row>
       </Space>
     </AppLayout>
   );
