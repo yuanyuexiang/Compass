@@ -15,7 +15,7 @@ import {
   HomeOutlined,
   IdcardOutlined,
   LogoutOutlined,
-  NotificationFilled,
+  MailOutlined,
   SearchOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -25,22 +25,22 @@ import SelfSettingsModal from '@/components/SelfSettingsModal';
 import type { User } from '@/lib/types';
 
 const MENU_ITEMS = [
-  { key: '/', icon: <DashboardOutlined />, label: '工作台', emphasis: false },
-  { key: '/opportunities', icon: <SearchOutlined />, label: '商机', emphasis: false },
-  { key: '/profile', icon: <IdcardOutlined />, label: '画像', emphasis: false },
-  { key: '/settings', icon: <BellOutlined />, label: '订阅', emphasis: false },
-  { key: '/notifications', icon: <NotificationFilled />, label: '通知', emphasis: true },
+  { key: '/', icon: <DashboardOutlined />, label: '工作台' },
+  { key: '/opportunities', icon: <SearchOutlined />, label: '商机' },
+  { key: '/profile', icon: <IdcardOutlined />, label: '画像' },
+  { key: '/settings', icon: <BellOutlined />, label: '订阅' },
+  { key: '/notifications', icon: <MailOutlined />, label: '通知' },
 ];
 
 const ADMIN_MENU_ITEMS = [
-  { key: '/members', icon: <TeamOutlined />, label: '成员', emphasis: false },
+  { key: '/members', icon: <TeamOutlined />, label: '成员' },
 ];
 
 // 采集源全局共享，增改/启停会影响所有租户 → 采集管理仅平台管理员可见
 const PLATFORM_MENU_ITEMS = [
-  { key: '/sources', icon: <CloudDownloadOutlined />, label: '采集', emphasis: false },
-  { key: '/models', icon: <ApiOutlined />, label: '模型', emphasis: false },
-  { key: '/tenants', icon: <ApartmentOutlined />, label: '租户', emphasis: false },
+  { key: '/sources', icon: <CloudDownloadOutlined />, label: '采集' },
+  { key: '/models', icon: <ApiOutlined />, label: '模型' },
+  { key: '/tenants', icon: <ApartmentOutlined />, label: '租户' },
 ];
 
 const ADMIN_ROLES = ['tenant_admin', 'platform_admin'];
@@ -182,7 +182,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
                 <Link
                   key={item.key}
                   href={item.key}
-                  className={`rail-item${selected ? ' rail-item-active' : ''}${item.emphasis ? ' rail-item-emphasis' : ''}`}
+                  className={`rail-item${selected ? ' rail-item-active' : ''}`}
                 >
                   <span className="rail-item-icon">{icon}</span>
                   <span className="rail-item-label">{item.label}</span>
