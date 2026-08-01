@@ -6,13 +6,17 @@ import {
   App,
   Button,
   Card,
+  Col,
   Collapse,
+  Descriptions,
   Empty,
   Form,
   Input,
   InputNumber,
+  List,
   Modal,
   Popconfirm,
+  Row,
   Select,
   Skeleton,
   Space,
@@ -107,6 +111,7 @@ export default function SourcesPage() {
   const watchedAdapter = Form.useWatch('adapter', form);
   // 「高级设置」折叠面板展开状态：编辑时默认展开；校验失败时自动展开露出错误提示
   const [advOpen, setAdvOpen] = useState<string[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -116,6 +121,7 @@ export default function SourcesPage() {
         apiFetch<ScheduleInfo>('/api/sources/schedule'),
       ]);
       setItems(sources);
+      setSelectedId((current) => current ?? sources.find((item) => item.status !== 'pending')?.id ?? null);
       setAdapters(adapterList);
       setSchedule(sched);
       setIntervalInput(sched.interval_minutes);
@@ -354,6 +360,7 @@ export default function SourcesPage() {
 
   const pendingItems = items.filter((i) => i.status === 'pending');
   const listedItems = items.filter((i) => i.status !== 'pending');
+  const selected = listedItems.find((item) => item.id === selectedId) ?? null;
 
   const columns: ColumnsType<SourceItem> = [
     {
@@ -560,33 +567,52 @@ export default function SourcesPage() {
         </Card>
       ) : null}
 
-      <Card
-        className="compass-card"
-        title="数据源"
-        extra={
-          <Space>
-            <Button icon={<CloudDownloadOutlined />} onClick={() => triggerCrawl()}>
-              全部采集
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openModal(null)}>
-              新增数据源
-            </Button>
-          </Space>
-        }
-      >
-        {loading ? (
-          <Skeleton active paragraph={{ rows: 4 }} />
-        ) : (
-          <Table<SourceItem>
-            rowKey="id"
-            columns={columns}
-            dataSource={listedItems}
-            pagination={false}
-            size="middle"
-            locale={{ emptyText: <Empty description="暂无数据源，点击右上角新增" /> }}
-          />
-        )}
-      </Card>
+      <Row gutter={[16, 16]} align="top">
+        <Col xs={24} lg={9} xl={8}>
+          <Card
+            className="compass-card opportunity-list-card"
+            title={`数据源（${listedItems.length}）`}
+            extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => openModal(null)}>新增</Button>}
+          >
+            <Button block icon={<CloudDownloadOutlined />} onClick={() => triggerCrawl()} style={{ marginBottom: 12 }}>全部采集</Button>
+            <List<SourceItem>
+              loading={loading}
+              dataSource={listedItems}
+              locale={{ emptyText: <Empty description="暂无数据源" /> }}
+              renderItem={(item) => (
+                <List.Item className={`opportunity-list-item${item.id === selectedId ? ' opportunity-list-item-active' : ''}`} onClick={() => setSelectedId(item.id)}>
+                  <List.Item.Meta
+                    title={<Typography.Text strong>{item.display_name}</Typography.Text>}
+                    description={<Space direction="vertical" size={5}><Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.name}</Typography.Text><Space wrap><Tag color={item.enabled ? 'green' : 'default'}>{item.enabled ? '运行中' : '已停用'}</Tag><Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.announcement_count.toLocaleString()} 条公告</Typography.Text></Space></Space>}
+                  />
+                </List.Item>
+              )}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} lg={15} xl={16}>
+          <Card className="compass-card opportunity-detail" title={selected?.display_name ?? '数据源详情'}>
+            {selected ? <Space direction="vertical" size={20} style={{ width: '100%' }}>
+              <Descriptions column={{ xs: 1, md: 2 }}>
+                <Descriptions.Item label="唯一标识">{selected.name}</Descriptions.Item>
+                <Descriptions.Item label="采集平台">{selected.adapter_display_name || selected.adapter}</Descriptions.Item>
+                <Descriptions.Item label="运行状态"><Tag color={selected.enabled ? 'green' : 'default'}>{selected.enabled ? '已启用' : '已停用'}</Tag></Descriptions.Item>
+                <Descriptions.Item label="累计公告">{selected.announcement_count.toLocaleString()}</Descriptions.Item>
+                <Descriptions.Item label="上次采集">{formatDateTime(selected.last_run_at)}</Descriptions.Item>
+                <Descriptions.Item label="限速">{selected.min_interval_seconds} 秒/请求</Descriptions.Item>
+                <Descriptions.Item label="创建时间">{formatDateTime(selected.created_at)}</Descriptions.Item>
+              </Descriptions>
+              <Space wrap>
+                <Button type="primary" icon={<ThunderboltOutlined />} disabled={!selected.enabled} onClick={() => triggerCrawl(selected)}>立即采集</Button>
+                <Button onClick={() => openModal(selected)}>编辑配置</Button>
+                <Space><Switch checked={selected.enabled} disabled={selected.status !== 'active'} onChange={(checked) => toggleEnabled(selected, checked)} /><Typography.Text>{selected.enabled ? '已启用' : '已停用'}</Typography.Text></Space>
+                {selected.announcement_count === 0 ? <Popconfirm title={`删除数据源「${selected.display_name}」？`} onConfirm={() => deleteSource(selected)}><Button danger icon={<DeleteOutlined />}>删除</Button></Popconfirm> : null}
+              </Space>
+              <div><Typography.Text strong>采集配置</Typography.Text><pre className="opportunity-clean-text" style={{ marginTop: 10, padding: 14, background: '#fafbfd', borderRadius: 8 }}>{JSON.stringify(selected.config, null, 2)}</pre></div>
+            </Space> : <Empty description="从左侧选择数据源" />}
+          </Card>
+        </Col>
+      </Row>
 
       <Modal
         title={editing ? `编辑数据源：${editing.display_name}` : '新增数据源'}

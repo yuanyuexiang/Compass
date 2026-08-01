@@ -289,4 +289,5 @@ export interface NotificationItem {
   body: string;
   read: boolean;
   created_at: string;
+  announcement_id: number | string | null;
 }

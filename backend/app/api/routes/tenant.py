@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, select
 
 from app.ai import websearch
 from app.ai.llm_config import friendly_llm_error
@@ -487,8 +487,16 @@ def list_notifications(
     limit: int = Query(default=50, le=200), current: CurrentUser = CurrentUserDep
 ) -> list[dict]:
     with session_scope() as session:
-        rows = session.scalars(
-            select(Notification)
+        rows = session.execute(
+            select(Notification, Project.announcement_id)
+            .outerjoin(
+                MatchResult,
+                and_(
+                    MatchResult.id == Notification.related_match_id,
+                    MatchResult.tenant_id == current.tenant_id,
+                ),
+            )
+            .outerjoin(Project, Project.id == MatchResult.project_id)
             .where(Notification.tenant_id == current.tenant_id, Notification.channel == "web")
             .order_by(Notification.id.desc())
             .limit(limit)
@@ -497,8 +505,9 @@ def list_notifications(
             {
                 "id": n.id, "title": n.title, "body": n.body,
                 "read": n.read, "created_at": n.created_at,
+                "announcement_id": announcement_id,
             }
-            for n in rows
+            for n, announcement_id in rows
         ]
 
 

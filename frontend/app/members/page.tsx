@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import { Alert, App, Avatar, Button, Card, Col, Descriptions, Empty, Form, Input, List, Modal, Popconfirm, Row, Select, Space, Tag, Typography } from 'antd';
 import { KeyOutlined, PlusOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch, getCachedUser } from '@/lib/api';
@@ -29,6 +28,7 @@ export default function MembersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<MemberItem | null>(null);
   const [saving, setSaving] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | string | null>(null);
   const [createForm] = Form.useForm<CreateForm>();
   const [resetForm] = Form.useForm<{ password: string }>();
   const me = getCachedUser<User>();
@@ -39,6 +39,7 @@ export default function MembersPage() {
     try {
       const data = await apiFetch<{ items: MemberItem[] }>('/api/tenant/users');
       setItems(data.items ?? []);
+      setSelectedId((current) => current ?? data.items?.[0]?.id ?? null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -100,52 +101,7 @@ export default function MembersPage() {
     }
   };
 
-  const columns: ColumnsType<MemberItem> = [
-    {
-      title: '用户名',
-      dataIndex: 'username',
-      key: 'username',
-      render: (v: string, rec) => (
-        <Space size={6}>
-          <span style={{ fontWeight: 500 }}>{v}</span>
-          {String(rec.id) === String(me?.id) ? <Tag>我</Tag> : null}
-        </Space>
-      ),
-    },
-    {
-      title: '角色',
-      dataIndex: 'role',
-      key: 'role',
-      width: 130,
-      render: (r: string, rec) =>
-        r === 'platform_admin' ? (
-          <Tag color="gold">{rec.role_label}</Tag>
-        ) : r === 'tenant_admin' ? (
-          <Tag color="geekblue">{rec.role_label}</Tag>
-        ) : (
-          <Tag>{rec.role_label}</Tag>
-        ),
-    },
-    { title: '邮箱', dataIndex: 'email', key: 'email', width: 200, render: (v: string | null) => v ?? '-' },
-    {
-      title: '状态',
-      dataIndex: 'enabled',
-      key: 'enabled',
-      width: 90,
-      render: (v: boolean) => (v ? <Tag color="green">正常</Tag> : <Tag color="red">已停用</Tag>),
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 150,
-      render: (v: string | null) => formatDateTime(v),
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 300,
-      render: (_, rec) => {
+  const memberActions = (rec: MemberItem) => {
         const isSelf = String(rec.id) === String(me?.id);
         const isPlatformAdmin = rec.role === 'platform_admin';
         return (
@@ -179,31 +135,47 @@ export default function MembersPage() {
             ) : null}
           </Space>
         );
-      },
-    },
-  ];
+  };
+
+  const selected = items.find((item) => String(item.id) === String(selectedId)) ?? null;
 
   return (
     <AppLayout title="成员管理" subtitle="管理本企业的登录账号与角色">
-      <Card
-        className="compass-card"
-        title="成员列表"
-        extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新增成员
-          </Button>
-        }
-      >
+      <Row gutter={[16, 16]} align="top">
+        <Col xs={24} lg={9} xl={8}>
+      <Card className="compass-card opportunity-list-card" title="成员列表" extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新增</Button>}>
         {error ? <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} /> : null}
-        <Table<MemberItem>
-          size="middle"
-          rowKey={(r) => String(r.id)}
-          columns={columns}
-          dataSource={items}
+        <List<MemberItem>
           loading={loading}
-          pagination={false}
+          dataSource={items}
+          locale={{ emptyText: <Empty description="暂无成员" /> }}
+          renderItem={(item) => (
+            <List.Item className={`opportunity-list-item${String(item.id) === String(selectedId) ? ' opportunity-list-item-active' : ''}`} onClick={() => setSelectedId(item.id)}>
+              <List.Item.Meta
+                avatar={<Avatar>{item.username.slice(0, 1).toUpperCase()}</Avatar>}
+                title={<Space><Typography.Text strong>{item.username}</Typography.Text>{String(item.id) === String(me?.id) ? <Tag>我</Tag> : null}</Space>}
+                description={<Space wrap><Tag color={item.role === 'platform_admin' ? 'gold' : item.role === 'tenant_admin' ? 'geekblue' : 'default'}>{item.role_label}</Tag><Tag color={item.enabled ? 'green' : 'red'}>{item.enabled ? '正常' : '已停用'}</Tag></Space>}
+              />
+            </List.Item>
+          )}
         />
       </Card>
+        </Col>
+        <Col xs={24} lg={15} xl={16}>
+          <Card className="compass-card opportunity-detail" title={selected?.username ?? '成员详情'}>
+            {selected ? <Space direction="vertical" size={20} style={{ width: '100%' }}>
+              <Descriptions column={{ xs: 1, md: 2 }}>
+                <Descriptions.Item label="用户名">{selected.username}</Descriptions.Item>
+                <Descriptions.Item label="角色">{selected.role_label}</Descriptions.Item>
+                <Descriptions.Item label="邮箱">{selected.email ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="状态">{selected.enabled ? '正常' : '已停用'}</Descriptions.Item>
+                <Descriptions.Item label="创建时间">{formatDateTime(selected.created_at)}</Descriptions.Item>
+              </Descriptions>
+              <div><Typography.Text strong>账号操作</Typography.Text><div style={{ marginTop: 12 }}>{memberActions(selected)}</div></div>
+            </Space> : <Empty description="从左侧选择成员" />}
+          </Card>
+        </Col>
+      </Row>
 
       <Modal
         title="新增成员"
