@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, App, Card, Col, Empty, List, Row, Segmented, Skeleton, Space, Typography } from 'antd';
-import { BellFilled, ClockCircleOutlined, ProjectOutlined } from '@ant-design/icons';
+import { Alert, App, Button, Card, Col, Empty, List, Popconfirm, Row, Segmented, Skeleton, Space, Typography } from 'antd';
+import { BellFilled, ClockCircleOutlined, DeleteOutlined, ProjectOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import OpportunityDetailPanel from '@/components/OpportunityDetailPanel';
 import { apiFetch } from '@/lib/api';
@@ -36,8 +36,25 @@ export default function NotificationsPage() {
     setItems((list) => list.map((n) => (n.id === item.id ? { ...n, read: true } : n)));
     try {
       await apiFetch<{ ok: boolean }>(`/api/notifications/${item.id}/read`, { method: 'POST' });
+      window.dispatchEvent(new Event('compass:notifications-changed'));
     } catch (e) {
       setItems((list) => list.map((n) => (n.id === item.id ? { ...n, read: false } : n)));
+      message.error((e as Error).message);
+    }
+  };
+
+  const remove = async (item: NotificationItem) => {
+    try {
+      await apiFetch<{ ok: boolean }>(`/api/notifications/${item.id}`, { method: 'DELETE' });
+      const nextItems = items.filter((notification) => String(notification.id) !== String(item.id));
+      setItems(nextItems);
+      if (String(selectedId) === String(item.id)) {
+        const currentIndex = items.findIndex((notification) => String(notification.id) === String(item.id));
+        setSelectedId(nextItems[Math.min(currentIndex, nextItems.length - 1)]?.id ?? null);
+      }
+      window.dispatchEvent(new Event('compass:notifications-changed'));
+      message.success('通知已删除');
+    } catch (e) {
       message.error((e as Error).message);
     }
   };
@@ -84,6 +101,28 @@ export default function NotificationsPage() {
                   setSelectedId(item.id);
                   void markRead(item);
                 }}
+                extra={
+                  <Popconfirm
+                    title="删除这条通知？"
+                    description="关联商机和跟进记录不会被删除。"
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={(event) => {
+                      event?.stopPropagation();
+                      void remove(item);
+                    }}
+                  >
+                    <Button
+                      type="text"
+                      danger
+                      size="small"
+                      className="notification-delete"
+                      aria-label="删除通知"
+                      icon={<DeleteOutlined />}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </Popconfirm>
+                }
               >
                 <List.Item.Meta
                   avatar={

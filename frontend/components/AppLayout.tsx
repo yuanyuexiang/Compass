@@ -124,9 +124,14 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       .catch(() => {
         // 后端未启动时使用缓存信息，静默降级
       });
-    apiFetch<{ tenant?: { unread: number } }>('/api/stats')
-      .then((s) => setUnread(s.tenant?.unread ?? 0))
-      .catch(() => {});
+    const refreshUnread = () => {
+      apiFetch<{ tenant?: { unread: number } }>('/api/stats')
+        .then((s) => setUnread(s.tenant?.unread ?? 0))
+        .catch(() => {});
+    };
+    refreshUnread();
+    window.addEventListener('compass:notifications-changed', refreshUnread);
+    return () => window.removeEventListener('compass:notifications-changed', refreshUnread);
   }, [router, pathname]);
 
   const logout = () => {

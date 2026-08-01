@@ -512,6 +512,17 @@ a {
   font-size: 11px;
 }
 
+.notification-delete {
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.notification-row:hover .notification-delete,
+.notification-row-active .notification-delete,
+.notification-delete:focus-visible {
+  opacity: 1;
+}
+
 /* ===== 推荐商机 · 速览行（方案 A 长尾列表：一行一条，可快速扫读） ===== */
 .rec-compact-list {
   border-radius: 12px;

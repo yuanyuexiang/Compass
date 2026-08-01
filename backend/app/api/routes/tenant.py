@@ -521,6 +521,17 @@ def mark_read(notification_id: int, current: CurrentUser = CurrentUserDep) -> di
         return {"ok": True}
 
 
+@router.delete("/notifications/{notification_id}")
+def delete_notification(notification_id: int, current: CurrentUser = CurrentUserDep) -> dict:
+    """删除当前租户的一条站内通知；关联商机和匹配结果不受影响。"""
+    with session_scope() as session:
+        notification = session.get(Notification, notification_id)
+        if notification is None or notification.tenant_id != current.tenant_id:
+            raise HTTPException(status_code=404, detail="通知不存在")
+        session.delete(notification)
+        return {"ok": True}
+
+
 class NlSearchIn(BaseModel):
     query: str
     all_regions: bool = False
