@@ -107,3 +107,12 @@ def test_resolve_llm_target_precedence():
     assert fb and fb["base_url"] == "https://qw.example/v1"
     bad = {"providers": {}, "fallback": {"provider": "nope", "model": "x"}}
     assert resolve_llm_fallback(bad) is None
+
+
+def test_blank_scene_model_is_accepted_as_incomplete_draft():
+    from app.api.routes.admin import LlmConfigIn
+
+    body = LlmConfigIn.model_validate(
+        {"providers": [], "scene_models": {"extract": {"provider": "deepseek", "model": ""}}}
+    )
+    assert body.scene_models["extract"].model == ""

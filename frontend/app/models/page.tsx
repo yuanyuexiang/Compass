@@ -157,6 +157,14 @@ export default function ModelsPage() {
     nextScene: Record<string, SceneModel>,
     nextFallback: SceneModel | null
   ): Promise<boolean> => {
+    const validScene = Object.fromEntries(
+      Object.entries(nextScene).filter(
+        ([, value]) => value.provider.trim() && value.model.trim()
+      )
+    );
+    const validFallback = nextFallback?.provider.trim() && nextFallback.model.trim()
+      ? nextFallback
+      : null;
     try {
       await apiFetch('/api/admin/llm', {
         method: 'PUT',
@@ -166,8 +174,8 @@ export default function ModelsPage() {
             api_key: p.newKey ?? '',
             base_url: p.base_url,
           })),
-          scene_models: nextScene,
-          fallback: nextFallback,
+          scene_models: validScene,
+          fallback: validFallback,
         }),
       });
       message.success({ content: '已保存', key: 'llm-save', duration: 1.2 });
@@ -185,6 +193,10 @@ export default function ModelsPage() {
       return;
     }
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    const incomplete = [...Object.values(sceneModels), ...(fallback ? [fallback] : [])].some(
+      (value) => !value.provider.trim() || !value.model.trim()
+    );
+    if (incomplete) return;
     autosaveTimer.current = setTimeout(() => {
       persist(providers, sceneModels, fallback);
     }, 600);
@@ -343,9 +355,15 @@ export default function ModelsPage() {
           style={{ width: 160 }}
           value={cur?.provider}
           options={providerOptions}
-          onChange={(prov) =>
-            prov ? setCur({ provider: prov, model: cur?.model ?? '' }) : setCur(null)
-          }
+          onChange={(prov) => {
+            if (!prov) {
+              setCur(null);
+              return;
+            }
+            const suggested = presetOf(prov)?.models[0] ?? '';
+            const currentModel = cur?.provider === prov ? cur.model : '';
+            setCur({ provider: prov, model: currentModel || suggested });
+          }}
         />
         <AutoComplete
           placeholder="litellm 模型名，如 deepseek/deepseek-v4-flash"
@@ -355,6 +373,11 @@ export default function ModelsPage() {
           options={(presetOf(cur?.provider ?? '')?.models ?? []).map((m) => ({ value: m }))}
           onChange={(v) => cur && setCur({ ...cur, model: v })}
         />
+        {cur?.provider && !cur.model.trim() ? (
+          <Typography.Text type="warning" style={{ fontSize: 12 }}>
+            填写模型名后自动保存
+          </Typography.Text>
+        ) : null}
       </Space>
     );
   };

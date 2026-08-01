@@ -217,8 +217,10 @@ LLM_SCENES = {
     "default": "默认模型",
     "extract": "字段提取",
     "match": "匹配精排",
+    "match_eval": "离线匹配评测",
     "nl_search": "NL 搜索",
     "profile_suggest": "AI 画像",
+    "profile_material": "企业材料抽取",
     "source_suggest": "AI 识别数据源",
 }
 
@@ -231,7 +233,8 @@ class LlmProviderIn(BaseModel):
 
 class LlmSceneModelIn(BaseModel):
     provider: str
-    model: str = Field(min_length=1, max_length=100)
+    # 空模型表示前端仍在选择中；保存时会被过滤，不应让整份配置返回 422。
+    model: str = Field(default="", max_length=100)
 
 
 class LlmConfigIn(BaseModel):
