@@ -379,6 +379,139 @@ a {
   background: #fff7e0;
 }
 
+/* ===== 通知中心 · 收件箱列表 ===== */
+.notification-inbox {
+  overflow: hidden;
+  background: #fff;
+}
+
+.notification-inbox:hover {
+  transform: none;
+}
+
+.notification-inbox-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(47, 84, 235, 0.13), transparent 48%),
+    linear-gradient(145deg, #fff, #f5f7ff);
+  border-bottom: 1px solid #edf0f7;
+}
+
+.notification-summary-icon {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 13px;
+  color: #fff;
+  font-size: 19px;
+  background: linear-gradient(145deg, #2f54eb, #597ef7);
+  box-shadow: 0 7px 16px rgba(47, 84, 235, 0.22);
+}
+
+.notification-filter {
+  padding: 12px 14px;
+  border-bottom: 1px solid #f0f2f6;
+  background: #fafbfe;
+}
+
+.notification-filter .ant-segmented {
+  padding: 3px;
+  border-radius: 9px;
+  background: #eef1f7;
+}
+
+.notification-list-wrap {
+  padding: 8px;
+}
+
+.notification-row {
+  position: relative;
+  margin-bottom: 4px;
+  padding: 12px 11px !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.notification-row:hover {
+  background: #f7f9fd;
+}
+
+.notification-row-active {
+  border-color: #dce6ff !important;
+  background: linear-gradient(90deg, #edf3ff, #f7f9ff);
+}
+
+.notification-row-active::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 3px;
+  background: #2f54eb;
+}
+
+.notification-row-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  color: #8290a8;
+  font-size: 17px;
+  background: #f0f2f6;
+}
+
+.notification-row-unread .notification-row-icon {
+  color: #2f54eb;
+  background: #e9efff;
+}
+
+.notification-row-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.notification-unread-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #ff4d4f;
+  box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.1);
+}
+
+.notification-row-body {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.48);
+  font-size: 12px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.notification-row-unread .notification-row-body {
+  color: rgba(0, 0, 0, 0.62);
+}
+
+.notification-row-time {
+  color: rgba(0, 0, 0, 0.32);
+  font-size: 11px;
+}
+
 /* ===== 推荐商机 · 速览行（方案 A 长尾列表：一行一条，可快速扫读） ===== */
 .rec-compact-list {
   border-radius: 12px;

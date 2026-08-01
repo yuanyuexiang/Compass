@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, App, Badge, Card, Col, Empty, List, Row, Segmented, Skeleton, Space, Typography } from 'antd';
+import { Alert, App, Card, Col, Empty, List, Row, Segmented, Skeleton, Space, Typography } from 'antd';
+import { BellFilled, ClockCircleOutlined, ProjectOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import OpportunityDetailPanel from '@/components/OpportunityDetailPanel';
 import { apiFetch } from '@/lib/api';
+import { formatDateTime } from '@/lib/labels';
 import type { NotificationItem } from '@/lib/types';
 
 export default function NotificationsPage() {
@@ -19,6 +21,7 @@ export default function NotificationsPage() {
     apiFetch<NotificationItem[]>('/api/notifications?limit=100')
       .then((data) => {
         setItems(data ?? []);
+        setSelectedId((current) => current ?? data?.[0]?.id ?? null);
         setError(null);
       })
       .catch((e: Error) => {
@@ -46,16 +49,25 @@ export default function NotificationsPage() {
     <AppLayout title="通知中心" subtitle="推荐商机与系统消息，点击未读项标记为已读">
       <Row gutter={[16, 16]} align="top">
         <Col xs={24} lg={9} xl={8}>
-      <Card className="compass-card opportunity-list-card">
-        <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
-          <Typography.Text strong>通知列表</Typography.Text>
+      <Card className="compass-card notification-inbox" styles={{ body: { padding: 0 } }}>
+        <div className="notification-inbox-head">
+          <div className="notification-summary-icon"><BellFilled /></div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Typography.Text strong style={{ display: 'block', fontSize: 16 }}>消息中心</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {items.filter((item) => !item.read).length ? `${items.filter((item) => !item.read).length} 条消息等待查看` : '所有消息均已查看'}
+            </Typography.Text>
+          </div>
+        </div>
+        <div className="notification-filter">
           <Segmented
-            size="small"
+            block
             value={filter}
             onChange={(value) => setFilter(value as 'all' | 'unread')}
             options={[{ label: `全部 ${items.length}`, value: 'all' }, { label: `未读 ${items.filter((item) => !item.read).length}`, value: 'unread' }]}
           />
-        </Space>
+        </div>
+        <div className="notification-list-wrap">
         {error ? <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} /> : null}
         {loading ? (
           <Skeleton active paragraph={{ rows: 5 }} />
@@ -67,39 +79,42 @@ export default function NotificationsPage() {
             }}
             renderItem={(item) => (
               <List.Item
-                className={`notif-item ${item.read ? '' : 'notif-item-unread'}${String(item.id) === String(selectedId) ? ' opportunity-list-item-active' : ''}`}
+                className={`notification-row${item.read ? '' : ' notification-row-unread'}${String(item.id) === String(selectedId) ? ' notification-row-active' : ''}`}
                 onClick={() => {
                   setSelectedId(item.id);
                   void markRead(item);
                 }}
-                extra={
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    {item.created_at}
-                  </Typography.Text>
-                }
               >
                 <List.Item.Meta
+                  avatar={
+                    <div className="notification-row-icon">
+                      {item.announcement_id ? <ProjectOutlined /> : <BellFilled />}
+                    </div>
+                  }
                   title={
-                    <span>
-                      {!item.read ? <Badge status="processing" style={{ marginRight: 8 }} /> : null}
+                    <div className="notification-row-title">
                       <Typography.Text
                         strong={!item.read}
-                        style={item.read ? { color: 'rgba(0, 0, 0, 0.45)' } : undefined}
+                        ellipsis
+                        style={item.read ? { color: 'rgba(0, 0, 0, 0.58)', maxWidth: '100%' } : { maxWidth: '100%' }}
                       >
                         {item.title}
                       </Typography.Text>
-                    </span>
+                      {!item.read ? <span className="notification-unread-dot" /> : null}
+                    </div>
                   }
                   description={
-                    <span style={{ color: item.read ? 'rgba(0, 0, 0, 0.35)' : 'rgba(0, 0, 0, 0.55)' }}>
-                      {item.body}
-                    </span>
+                    <Space direction="vertical" size={5} style={{ width: '100%' }}>
+                      <span className="notification-row-body">{item.body}</span>
+                      <span className="notification-row-time"><ClockCircleOutlined /> {formatDateTime(item.created_at)}</span>
+                    </Space>
                   }
                 />
               </List.Item>
             )}
           />
         )}
+        </div>
       </Card>
         </Col>
         <Col xs={24} lg={15} xl={16}>
