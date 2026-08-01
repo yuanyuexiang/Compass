@@ -19,6 +19,7 @@ from app.matching.engine import build_match_input, llm_rerank
 from app.matching.profiles import build_summary_text
 
 POSITIVE_STAR = 4
+DEFAULT_TOKEN_BUDGET = 100_000
 
 
 def load_golden(path: str) -> tuple[dict[str, dict], list[dict]]:
@@ -99,6 +100,12 @@ def main() -> None:
     ap.add_argument("--golden", default="evals/golden.jsonl")
     ap.add_argument("--tag", required=True)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument(
+        "--token-budget",
+        type=int,
+        default=DEFAULT_TOKEN_BUDGET,
+        help="本次评测成功响应的 Token 上限，默认 100000；<=0 表示不限",
+    )
     args = ap.parse_args()
 
     profiles, items = load_golden(args.golden)
@@ -107,7 +114,17 @@ def main() -> None:
     print("黄金集体检：" + json.dumps(dataset_summary(items), ensure_ascii=False))
 
     results = []
+    used_tokens = 0
+
+    def record_usage(usage) -> None:
+        nonlocal used_tokens
+        if usage is not None:
+            used_tokens += int(getattr(usage, "total_tokens", 0) or 0)
+
     for i, it in enumerate(items, 1):
+        if args.token_budget > 0 and used_tokens >= args.token_budget:
+            print(f"Token 预算已用完（{used_tokens}/{args.token_budget}），停止后续样本")
+            break
         profile_data = profiles[it["profile_id"]]
         profile = SimpleNamespace(data=profile_data, summary_text=build_summary_text(profile_data))
         ann = SimpleNamespace(
@@ -119,7 +136,11 @@ def main() -> None:
             category=it["project"].get("category") or {},
             summary=it["project"].get("summary") or "",
         )
-        card = llm_rerank(build_match_input(project, ann, profile))
+        card = llm_rerank(
+            build_match_input(project, ann, profile),
+            scene="match_eval",
+            usage_callback=record_usage,
+        )
         results.append(
             {
                 "seq": it["seq"],
@@ -140,7 +161,8 @@ def main() -> None:
         )
         print(
             f"[{i}/{len(items)}] #{it['seq']} 期望{it['expected_star']}星 "
-            f"→ 实际{card.star}星({card.match_score:.0f}) {card.advice} | {ann.title[:32]}"
+            f"→ 实际{card.star}星({card.match_score:.0f}) {card.advice} | {ann.title[:32]} "
+            f"| 累计 {used_tokens} tokens"
         )
 
     out = pathlib.Path(f"evals/results_{args.tag}.jsonl")

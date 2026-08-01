@@ -47,14 +47,19 @@ def test_extract_award_facts_keeps_only_grounded_evidence(monkeypatch):
             },
         ]
     }
-    monkeypatch.setattr(
-        profile_materials, "extract_completion", lambda **kwargs: _completion(payload)
-    )
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return _completion(payload)
+
+    monkeypatch.setattr(profile_materials, "extract_completion", fake_completion)
     facts = profile_materials.extract_award_facts(text, tenant_id=7)
     assert len(facts) == 1
     assert facts[0].project_name == "智慧校园改造项目"
     assert facts[0].services == ["综合布线"]
     assert evidence_page(facts[0].evidence_quote, text) == 1
+    assert captured["scene"] == "profile_material"
 
 
 def test_case_normalization_and_display():

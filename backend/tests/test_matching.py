@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.matching import engine
 from app.matching.engine import (
+    build_match_input,
     finalize_assessment,
     parse_budget_yuan,
     rule_filter,
@@ -170,6 +171,20 @@ def test_select_relevant_excerpt_finds_late_qualification_section():
     assert len(excerpt) <= 300
 
 
+def test_build_match_input_caps_large_profile_and_project_text():
+    project = SimpleNamespace(fields={}, category={}, summary="摘" * 2000)
+    announcement = SimpleNamespace(title="测试项目", clean_text=None)
+    profile = SimpleNamespace(
+        data={"filter": {}},
+        summary_text="画像" * 2000,
+    )
+    text = build_match_input(project, announcement, profile)
+    assert "画像" * (engine.PROFILE_SUMMARY_LIMIT // 2) in text
+    assert "画像" * (engine.PROFILE_SUMMARY_LIMIT // 2 + 1) not in text
+    assert "摘" * engine.PROJECT_SUMMARY_LIMIT in text
+    assert "摘" * (engine.PROJECT_SUMMARY_LIMIT + 1) not in text
+
+
 def test_llm_rerank_accepts_fenced_json_and_computes_total(monkeypatch):
     payload = _assessment().model_dump(mode="json")
     response = SimpleNamespace(
@@ -180,3 +195,25 @@ def test_llm_rerank_accepts_fenced_json_and_computes_total(monkeypatch):
     assert card.match_score == 90
     assert card.star == 5
     assert card.vector_similarity == 0.42
+
+
+def test_llm_rerank_bounds_output_and_supports_eval_scene(monkeypatch):
+    payload = _assessment().model_dump(mode="json")
+    usage = SimpleNamespace(total_tokens=321)
+    response = SimpleNamespace(
+        usage=usage,
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+    )
+    captured = {}
+    seen_usage = []
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return response
+
+    monkeypatch.setattr(engine, "extract_completion", fake_completion)
+    engine.llm_rerank("input", scene="match_eval", usage_callback=seen_usage.append)
+
+    assert captured["scene"] == "match_eval"
+    assert captured["max_tokens"] == engine.MATCH_MAX_TOKENS
+    assert seen_usage == [usage]

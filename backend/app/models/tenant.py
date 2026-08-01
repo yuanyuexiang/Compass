@@ -172,7 +172,7 @@ class LlmUsage(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
-    # extract / match / nl_search / profile_suggest / source_suggest
+    # extract / match / match_eval / nl_search / profile_suggest / profile_material / source_suggest
     scene: Mapped[str] = mapped_column(String(32), index=True)
     model: Mapped[str] = mapped_column(String(64), default="")
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)

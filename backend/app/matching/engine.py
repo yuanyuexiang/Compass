@@ -8,6 +8,7 @@
 import json
 import logging
 import re
+from collections.abc import Callable
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 STAR_BY_SCORE = ((90, 5), (80, 4), (65, 3), (50, 2), (0, 1))
 MAX_ATTEMPTS = 3
+MATCH_MAX_TOKENS = 1100
+PROFILE_SUMMARY_LIMIT = 2000
+PROJECT_SUMMARY_LIMIT = 800
 
 _WAN_RE = re.compile(r"([\d,]+(?:\.\d+)?)\s*万")
 _YUAN_RE = re.compile(r"([\d,]+(?:\.\d+)?)\s*元")
@@ -96,7 +100,7 @@ def vector_similarity(session: Session, project: Project, tenant_id: int) -> flo
 
 
 # 按业务相关性抽取公告片段，避免只截正文开头而漏掉后部的资格、技术和评分条款。
-CLEAN_TEXT_EXCERPT = 4000
+CLEAN_TEXT_EXCERPT = 2500
 _SECTION_KEYWORDS = {
     "采购需求": 8,
     "项目需求": 8,
@@ -158,16 +162,17 @@ def build_match_input(
     regions = "、".join(flt.get("regions") or []) or "不限"
     min_budget = flt.get("min_budget")
     budget_line = f"{min_budget / 10000:g} 万元" if min_budget else "不限"
+    profile_summary = profile.summary_text or json.dumps(profile.data, ensure_ascii=False)
     lines = [
         "【企业能力画像】",
-        profile.summary_text or json.dumps(profile.data, ensure_ascii=False),
+        profile_summary[:PROFILE_SUMMARY_LIMIT],
         f"企业硬性筛选条件：关注地区：{regions}；最低预算线：{budget_line}",
         "",
         "【招标项目】",
         f"标题: {ann.title}",
         f"结构化信息: {json.dumps(fields, ensure_ascii=False)}",
         f"分类: {json.dumps(project.category, ensure_ascii=False)}",
-        f"摘要: {project.summary}",
+        f"摘要: {(project.summary or '')[:PROJECT_SUMMARY_LIMIT]}",
     ]
     if similarity is not None:
         lines.append(f"语义相似度（仅供参考，不是淘汰条件）: {similarity:.3f}")
@@ -235,6 +240,8 @@ def llm_rerank(
     tenant_id: int | None = None,
     system_prompt: str | None = None,
     similarity: float | None = None,
+    scene: str = "match",
+    usage_callback: Callable[[object], None] | None = None,
 ) -> MatchScoreCard:
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -245,9 +252,12 @@ def llm_rerank(
                     {"role": "user", "content": input_text},
                 ],
                 temperature=0.0,
-                scene="match",
+                max_tokens=MATCH_MAX_TOKENS,
+                scene=scene,
                 tenant_id=tenant_id,
             )
+            if usage_callback is not None:
+                usage_callback(getattr(resp, "usage", None))
             content = resp.choices[0].message.content
             if not content or not content.strip():
                 raise ValueError("LLM 返回空 content")

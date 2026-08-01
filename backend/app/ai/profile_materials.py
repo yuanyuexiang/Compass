@@ -94,7 +94,7 @@ def extract_award_facts(text: str, tenant_id: int) -> list[ExtractedAwardFact]:
             {"role": "user", "content": text[:MATERIAL_TEXT_LIMIT]},
         ],
         temperature=0.0,
-        scene="profile_suggest",
+        scene="profile_material",
         tenant_id=tenant_id,
     )
     content = resp.choices[0].message.content or ""

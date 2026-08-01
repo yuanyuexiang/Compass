@@ -18,7 +18,8 @@ KEY_QUOTA_PROFILE_SUGGEST = "quota_profile_suggest_daily"
 KEY_QUOTA_MATCH = "quota_match_daily"
 DEFAULT_QUOTA_NL_SEARCH = 50
 DEFAULT_QUOTA_PROFILE_SUGGEST = 10
-DEFAULT_QUOTA_MATCH = 300
+# 精排是成本最高场景；默认按单租户每日约 100 次封顶，平台管理员仍可覆盖。
+DEFAULT_QUOTA_MATCH = 100
 
 
 def get_setting(session: Session, key: str, default=None):

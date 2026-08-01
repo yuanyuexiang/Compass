@@ -16,13 +16,14 @@ from app.ai.profile_materials import run_material_extraction
 from app.core import storage
 from app.core.db import session_scope
 from app.crawler.base import SourceAdapter, ensure_cst, get_adapter, url_fingerprint
-from app.matching.engine import run_match
+from app.matching.engine import rule_filter, run_match, vector_similarity
 from app.matching.profiles import tenant_watches_source
 from app.models import (
     Announcement,
     AnnouncementStatus,
     Attachment,
     CompanyProfile,
+    MatchResult,
     ProfileMaterial,
     Project,
     Source,
@@ -284,6 +285,40 @@ def match_project_task(project_id: int, tenant_id: int) -> None:
 
 
 REMATCH_WINDOW_DAYS = 7
+REMATCH_LLM_LIMIT = 60
+
+
+def select_rematch_candidates(
+    session: Session, tenant_id: int, project_ids: list[int], limit: int = REMATCH_LLM_LIMIT
+) -> list[int]:
+    """零 Token 预筛画像重匹配候选：硬规则先过滤，再按已有结果和向量相关性排序。"""
+    profile = session.scalar(select(CompanyProfile).where(CompanyProfile.tenant_id == tenant_id))
+    if profile is None:
+        return []
+    existing_ids = set(
+        session.scalars(
+            select(MatchResult.project_id).where(
+                MatchResult.tenant_id == tenant_id,
+                MatchResult.project_id.in_(project_ids),
+            )
+        ).all()
+    ) if project_ids else set()
+    ranked: list[tuple[int, float, int]] = []
+    for project_id in project_ids:
+        project = session.get(Project, project_id)
+        if project is None or not rule_filter(project, profile.data or {})[0]:
+            continue
+        similarity = vector_similarity(session, project, tenant_id)
+        # 已产出过的推荐优先刷新；其余按向量相关性排序。无向量数据仍保留在候选尾部。
+        ranked.append(
+            (
+                1 if project_id in existing_ids else 0,
+                similarity if similarity is not None else -1.0,
+                project_id,
+            )
+        )
+    ranked.sort(reverse=True)
+    return [project_id for _, _, project_id in ranked[:limit]]
 
 
 @celery.task(name="app.tasks.pipeline.rematch_tenant", max_retries=1, default_retry_delay=120)
@@ -307,15 +342,16 @@ def rematch_tenant_task(tenant_id: int) -> None:
         )
         if watched:
             stmt = stmt.where(Announcement.source_id.in_(watched))
-        project_ids = session.scalars(stmt).all()
+        all_project_ids = list(session.scalars(stmt).all())
+        project_ids = select_rematch_candidates(session, tenant_id, all_project_ids)
     done = 0
     for pid in project_ids:
         with session_scope() as session:
             if run_match(session, pid, tenant_id, force=True) is not None:
                 done += 1
     logger.info(
-        "画像重评估完成 tenant=%s 窗口=%d天 候选=%d 产出/更新=%d",
-        tenant_id, REMATCH_WINDOW_DAYS, len(project_ids), done,
+        "画像重评估完成 tenant=%s 窗口=%d天 原始=%d 精排候选=%d 产出/更新=%d",
+        tenant_id, REMATCH_WINDOW_DAYS, len(all_project_ids), len(project_ids), done,
     )
 
 
