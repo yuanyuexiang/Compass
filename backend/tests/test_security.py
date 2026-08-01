@@ -82,9 +82,12 @@ def test_crypto_roundtrip_and_mask():
 
 
 def test_resolve_llm_target_precedence():
-    """场景模型解析优先级：场景映射 > default 映射 > .env 兜底；fallback 需供应商存在。"""
-    from app.ai.llm_config import resolve_llm_fallback, resolve_llm_target
-    from app.core.config import settings
+    """场景模型解析优先级：场景映射 > default 映射；fallback 需供应商存在。"""
+    from app.ai.llm_config import (
+        LlmConfigurationError,
+        resolve_llm_fallback,
+        resolve_llm_target,
+    )
 
     cfg = {
         "providers": {
@@ -101,8 +104,8 @@ def test_resolve_llm_target_precedence():
     assert t["model"] == "openai/qwen-plus" and t["api_key"] == "k2"
     t = resolve_llm_target(cfg, "extract")  # 未映射场景走 default
     assert t["model"] == "deepseek/deepseek-v4-flash" and t["api_key"] == "k1"
-    t = resolve_llm_target({"providers": {}, "scene_models": {}}, "match")  # 空配置走 .env
-    assert t["model"] == settings.llm_extract_model
+    with pytest.raises(LlmConfigurationError):
+        resolve_llm_target({"providers": {}, "scene_models": {}}, "match")
     fb = resolve_llm_fallback(cfg)
     assert fb and fb["base_url"] == "https://qw.example/v1"
     bad = {"providers": {}, "fallback": {"provider": "nope", "model": "x"}}

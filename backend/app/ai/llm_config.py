@@ -1,7 +1,7 @@
 """LLM 调用配置：直接使用 LiteLLM，不自研封装层（tech-design.md §3，已确认）。
 
-- 模型/密钥优先读平台管理员在「模型服务」页的配置（system_settings，60 秒进程缓存，
-  改动即时生效无需重启）；未配置时回退 .env（settings.llm_extract_model + deepseek key）。
+- 模型/密钥读取平台管理员在「模型服务」页的配置（system_settings，60 秒进程缓存，
+  改动即时生效无需重启）；未配置默认模型时明确报错，不再回退环境变量密钥。
 - 支持按场景（extract/match/nl_search/...）指定不同模型；主模型失败自动切备用（fallback）。
 - 每次调用记账到 llm_usage 表（配额判断与商业化计费的底账），失败只告警不影响业务。
 """
@@ -14,6 +14,10 @@ import litellm
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class LlmConfigurationError(RuntimeError):
+    """平台尚未配置可用的模型供应商或默认模型。"""
 
 _cfg_cache: dict = {"at": 0.0, "data": None}
 _CFG_TTL = 60.0
@@ -44,8 +48,8 @@ def _load_llm_config() -> dict:
                     }
             cfg["scene_models"] = get_setting(session, KEY_LLM_SCENE_MODELS, {}) or {}
             cfg["fallback"] = get_setting(session, KEY_LLM_FALLBACK, None)
-    except Exception:  # noqa: BLE001  配置读取失败回退 .env，不拖垮调用
-        logger.warning("LLM 平台配置读取失败，回退 .env 默认", exc_info=True)
+    except Exception:  # noqa: BLE001  调用阶段会用清晰错误提示，不在加载阶段拖垮进程
+        logger.warning("LLM 平台配置读取失败", exc_info=True)
     _cfg_cache.update(at=now, data=cfg)
     return cfg
 
@@ -67,11 +71,7 @@ def resolve_llm_target(cfg: dict, scene: str) -> dict:
                 "api_key": provider["api_key"],
                 "base_url": provider["base_url"],
             }
-    return {
-        "model": settings.llm_extract_model,
-        "api_key": settings.deepseek_api_key,
-        "base_url": None,
-    }
+    raise LlmConfigurationError("请先在平台“模型服务”中配置供应商和默认模型")
 
 
 def resolve_llm_fallback(cfg: dict) -> dict | None:
@@ -115,6 +115,8 @@ def friendly_llm_error(exc: Exception) -> str | None:
     历史教训：DeepSeek 欠费时原始报错 `litellm.BadRequestError: ... Insufficient Balance`
     直接透给了终端用户。用户界面只该出现可行动的中文提示，原始异常记日志。
     """
+    if isinstance(exc, LlmConfigurationError):
+        return str(exc)
     if not type(exc).__module__.startswith("litellm"):
         return None
     text = str(exc)

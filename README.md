@@ -20,7 +20,7 @@
 docker compose up -d postgres redis minio   # 基础设施
 cd backend
 uv sync && uv run pytest                    # 安装依赖并跑测试
-cp ../.env.example .env                     # 填入 DEEPSEEK_API_KEY
+cp ../.env.example .env                     # 按需填写基础设施与联网搜索配置
 uv run python scripts/dev_seed.py           # 种子租户（账号 admin / admin123）
 uv run python scripts/dev_crawl.py --adapter ccgp --limit 3    # 真实采集
 uv run python scripts/dev_extract.py        # AI 结构化提取

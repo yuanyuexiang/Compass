@@ -15,8 +15,7 @@ class Settings(BaseSettings):
     minio_bucket: str = "compass-attachments"
     minio_secure: bool = False
 
-    # LLM（M2 启用）
-    deepseek_api_key: str = ""
+    # LLM 默认记账模型名；供应商密钥与实际场景模型统一在「模型服务」中管理。
     llm_extract_model: str = "deepseek/deepseek-v4-flash"
     # Embedding（M2 启用，走 SiliconFlow 等 API）
     siliconflow_api_key: str = ""

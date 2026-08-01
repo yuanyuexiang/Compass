@@ -1,6 +1,6 @@
 """M2 演练脚本：对库中已清洗的真实公告跑 AI 提取，人工检验质量。
 
-用法（backend/ 目录下，需 .env 配好 DEEPSEEK_API_KEY）：
+用法（backend/ 目录下，需先在平台「模型服务」配置默认模型）：
     uv run python scripts/dev_extract.py --limit 3
 """
 

@@ -245,7 +245,6 @@ class LlmConfigIn(BaseModel):
 
 @router.get("/llm")
 def get_llm_config(current: CurrentUser = PlatformAdminDep) -> dict:
-    from app.core.config import settings
     from app.core.crypto import decrypt, mask
     from app.core.kv import KEY_LLM_FALLBACK, KEY_LLM_PROVIDERS, KEY_LLM_SCENE_MODELS, get_setting
 
@@ -275,10 +274,6 @@ def get_llm_config(current: CurrentUser = PlatformAdminDep) -> dict:
         "scene_models": scene_models,
         "fallback": fallback,
         "scenes": LLM_SCENES,
-        "env_default": {
-            "model": settings.llm_extract_model,
-            "configured": bool(settings.deepseek_api_key),
-        },
         "usage_7d": [
             {"model": m or "（未知）", "calls": c, "total_tokens": int(t)} for m, c, t in usage
         ],

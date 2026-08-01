@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **V1 全链路已跑通**：采集（ccgp + 江苏公共资源两源）→ 清洗/附件 → DeepSeek 十二字段提取 → 发布 → 三级漏斗匹配（规则→[向量]→LLM 评分卡+六项风险）→ 订阅通知（站内信实测）→ Next.js 管理后台（9 页面）。已具备**审批制多租户账号体系**（注册申请→平台管理员审批→成员管理，登录限流+停用校验）与 **LLM 用量记账/每日配额**（超额降级）。产品需求见 [prd.md](prd.md)，技术方案见 [tech-design.md](tech-design.md)（架构/选型问题先查它；附录 D–G 是实测记录与遗留项清单，**开工前必读附录 G**）。
 
-密钥在 `backend/.env`（已 gitignore）：DEEPSEEK_API_KEY 已配；SILICONFLOW_API_KEY 未配 → 向量化自动跳过、匹配退化为二级漏斗，配上即恢复三级。METASO_API_KEY（秘塔 AI 搜索）供「AI 生成画像」联网检索，未配则该功能优雅降级（按钮报错、不影响其他）。
+LLM 供应商密钥与场景模型统一在平台「模型服务」中管理，不再使用 `DEEPSEEK_API_KEY` 环境变量。`SILICONFLOW_API_KEY` 未配时向量化自动跳过、匹配退化为二级漏斗；`METASO_API_KEY` 供企业画像联网检索，未配则该功能优雅降级。
 
 ## 常用命令
 

@@ -97,7 +97,6 @@ interface LlmConfig {
   scene_models: Record<string, SceneModel>;
   fallback: SceneModel | null;
   scenes: Record<string, string>;
-  env_default: { model: string; configured: boolean };
   usage_7d: { model: string; calls: number; total_tokens: number }[];
 }
 
@@ -111,7 +110,6 @@ export default function ModelsPage() {
   const [sceneModels, setSceneModels] = useState<Record<string, SceneModel>>({});
   const [fallback, setFallback] = useState<SceneModel | null>(null);
   const [scenes, setScenes] = useState<Record<string, string>>({});
-  const [envDefault, setEnvDefault] = useState<LlmConfig['env_default'] | null>(null);
   const [usage, setUsage] = useState<LlmConfig['usage_7d']>([]);
 
   const [editOpen, setEditOpen] = useState(false);
@@ -141,7 +139,6 @@ export default function ModelsPage() {
         setSceneModels(d.scene_models);
         setFallback(d.fallback);
         setScenes(d.scenes);
-        setEnvDefault(d.env_default);
         setUsage(d.usage_7d);
         setError(null);
       })
@@ -311,7 +308,7 @@ export default function ModelsPage() {
             disabled={!p.api_key_masked}
             onClick={() => {
               setTestProvider(p.name);
-              setTestModel(sceneModels.default?.model ?? envDefault?.model ?? '');
+              setTestModel(sceneModels.default?.model ?? '');
               setTestOpen(true);
             }}
           >
@@ -351,7 +348,7 @@ export default function ModelsPage() {
         </Typography.Text>
         <Select
           allowClear
-          placeholder={key === 'default' ? '未设置（走 .env）' : '继承默认'}
+          placeholder={key === 'default' ? '请选择默认供应商' : '继承默认'}
           style={{ width: 160 }}
           value={cur?.provider}
           options={providerOptions}
@@ -411,7 +408,7 @@ export default function ModelsPage() {
               columns={columns}
               dataSource={[...providers].sort((a, b) => a.name.localeCompare(b.name))}
               pagination={false}
-              locale={{ emptyText: '未配置供应商时，全部调用走服务器 .env 里的 DeepSeek 配置' }}
+              locale={{ emptyText: '尚未配置模型供应商，AI 功能暂不可用' }}
             />
           </Card>
 
@@ -420,9 +417,8 @@ export default function ModelsPage() {
               {Object.entries(scenes).map(([k, label]) => sceneRow(k, label))}
               {sceneRow('__fallback__', '备用模型')}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                未映射的场景走「默认模型」；默认也未设置时走服务器 .env（当前：
-                {envDefault?.model}
-                {envDefault?.configured ? '' : '，key 未配置'}）。备用模型在主模型调用失败时自动接管一次。
+                未映射的场景使用「默认模型」；默认模型未设置时 AI 功能不可用。
+                备用模型会在主模型调用失败时自动接管一次。
               </Typography.Text>
             </Space>
           </Card>
