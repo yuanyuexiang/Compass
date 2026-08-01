@@ -253,6 +253,17 @@ a {
   line-height: 1;
 }
 
+.rail-item-emphasis .rail-item-icon {
+  color: #aebdd4;
+  font-size: 23px;
+}
+
+.rail-item-emphasis:hover .rail-item-icon,
+.rail-item-emphasis.rail-item-active .rail-item-icon {
+  color: #26c9ee;
+  filter: drop-shadow(0 0 5px rgba(38, 201, 238, 0.32));
+}
+
 .rail-item-label {
   max-width: 62px;
   overflow: hidden;
