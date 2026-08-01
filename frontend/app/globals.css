@@ -259,6 +259,11 @@ a {
   font-size: 21px;
 }
 
+.rail-item-icon .ant-badge {
+  color: inherit;
+  line-height: 1;
+}
+
 .rail-item-label {
   max-width: 62px;
   overflow: hidden;
