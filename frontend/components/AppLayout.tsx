@@ -3,9 +3,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Avatar, Badge, Breadcrumb, Button, Dropdown, Layout, Menu, Space, Tooltip, Typography } from 'antd';
+import { Avatar, Badge, Breadcrumb, Button, Dropdown, Layout, Space, Typography } from 'antd';
 import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
-import type { MenuProps } from 'antd';
 import {
   ApartmentOutlined,
   ApiOutlined,
@@ -16,8 +15,6 @@ import {
   HomeOutlined,
   IdcardOutlined,
   LogoutOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
   MessageOutlined,
   SearchOutlined,
   SettingOutlined,
@@ -27,53 +24,33 @@ import { apiFetch, clearSession, getCachedUser, getToken } from '@/lib/api';
 import SelfSettingsModal from '@/components/SelfSettingsModal';
 import type { User } from '@/lib/types';
 
-const SIDER_COLLAPSED_KEY = 'compass-sider-collapsed';
-
-// 模块级缓存：AppLayout 随页面切换卸载重建，若每次都从默认值起步再等 effect 读
-// localStorage，会闪一次「展开→折叠」。缓存后新实例首帧即是正确状态。
-let collapsedCache: boolean | null = null;
-
-const ROLE_LABELS: Record<string, string> = {
-  platform_admin: '平台管理员',
-  tenant_admin: '企业管理员',
-  sales: '成员',
-};
-
 const MENU_ITEMS = [
-  { key: '/', icon: <DashboardOutlined />, label: <Link href="/">工作台</Link> },
-  { key: '/opportunities', icon: <SearchOutlined />, label: <Link href="/opportunities">商机查询</Link> },
-  { key: '/profile', icon: <IdcardOutlined />, label: <Link href="/profile">企业画像</Link> },
-  { key: '/settings', icon: <BellOutlined />, label: <Link href="/settings">订阅设置</Link> },
-  { key: '/notifications', icon: <MessageOutlined />, label: <Link href="/notifications">通知中心</Link> },
+  { key: '/', icon: <DashboardOutlined />, label: '工作台' },
+  { key: '/opportunities', icon: <SearchOutlined />, label: '商机' },
+  { key: '/profile', icon: <IdcardOutlined />, label: '画像' },
+  { key: '/settings', icon: <BellOutlined />, label: '订阅' },
+  { key: '/notifications', icon: <MessageOutlined />, label: '通知' },
 ];
 
 const ADMIN_MENU_ITEMS = [
-  { key: '/members', icon: <TeamOutlined />, label: <Link href="/members">成员管理</Link> },
+  { key: '/members', icon: <TeamOutlined />, label: '成员' },
 ];
 
 // 采集源全局共享，增改/启停会影响所有租户 → 采集管理仅平台管理员可见
 const PLATFORM_MENU_ITEMS = [
-  { key: '/sources', icon: <CloudDownloadOutlined />, label: <Link href="/sources">采集管理</Link> },
-  { key: '/models', icon: <ApiOutlined />, label: <Link href="/models">模型服务</Link> },
-  { key: '/tenants', icon: <ApartmentOutlined />, label: <Link href="/tenants">租户管理</Link> },
+  { key: '/sources', icon: <CloudDownloadOutlined />, label: '采集' },
+  { key: '/models', icon: <ApiOutlined />, label: '模型' },
+  { key: '/tenants', icon: <ApartmentOutlined />, label: '租户' },
 ];
 
 const ADMIN_ROLES = ['tenant_admin', 'platform_admin'];
 
-function menuItemsFor(role: string | undefined, collapsed: boolean): MenuProps['items'] {
-  const admin = [
+function menuItemsFor(role: string | undefined) {
+  return [
+    ...MENU_ITEMS,
     ...(ADMIN_ROLES.includes(role ?? '') ? ADMIN_MENU_ITEMS : []),
     ...(role === 'platform_admin' ? PLATFORM_MENU_ITEMS : []),
   ];
-  // 折叠态用扁平列表：antd 只对菜单直接子项做图标居中与悬停提示，嵌在分组里会失效
-  if (collapsed) {
-    return admin.length
-      ? [...MENU_ITEMS, { type: 'divider', style: { borderColor: 'rgba(255,255,255,.12)', margin: '8px 16px' } }, ...admin]
-      : [...MENU_ITEMS];
-  }
-  const items: MenuProps['items'] = [{ type: 'group', label: '工作区', children: MENU_ITEMS }];
-  if (admin.length) items.push({ type: 'group', label: '管理', children: admin });
-  return items;
 }
 
 function selectedMenuKey(pathname: string): string {
@@ -131,27 +108,6 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [unread, setUnread] = useState(0);
-  // 首屏（缓存为空）与 SSR 一致地从展开态起步，避免水合不一致；页面间切换直接取缓存
-  const [collapsed, setCollapsed] = useState(collapsedCache ?? false);
-  // 首帧禁用宽度过渡：硬刷新时从 localStorage 同步折叠态是瞬时定位，不播收合动画
-  const [animReady, setAnimReady] = useState(false);
-
-  useEffect(() => {
-    if (collapsedCache === null) {
-      collapsedCache = localStorage.getItem(SIDER_COLLAPSED_KEY) === '1';
-      setCollapsed(collapsedCache);
-    }
-    const timer = setTimeout(() => setAnimReady(true), 80);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const toggleCollapsed = () => {
-    setCollapsed((c) => {
-      collapsedCache = !c;
-      localStorage.setItem(SIDER_COLLAPSED_KEY, c ? '0' : '1');
-      return !c;
-    });
-  };
 
   useEffect(() => {
     if (!getToken()) {
@@ -202,60 +158,39 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Layout.Sider
-        width={208}
-        collapsedWidth={72}
-        collapsible
-        collapsed={collapsed}
-        trigger={null}
+        width={84}
         theme="dark"
-        className={`compass-sider${animReady ? '' : ' sider-no-anim'}`}
+        className="compass-sider"
         style={{ position: 'sticky', top: 0, height: '100vh' }}
       >
         <div className="sider-inner">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: collapsed ? 'center' : 'flex-start',
-              gap: 12,
-              padding: collapsed ? '20px 0 16px' : '20px 24px 16px',
-            }}
-          >
-            <CompassOutlined style={{ fontSize: 30, color: '#FAAD14' }} />
-            {!collapsed ? (
-              <div>
-                <div style={{ color: '#fff', fontSize: 20, fontWeight: 600, lineHeight: 1.25 }}>司南</div>
-                <div style={{ color: '#8C9BC4', fontSize: 12 }}>AI 寻标 Agent</div>
-              </div>
-            ) : null}
+          <div className="rail-brand" aria-label="司南 AI 寻标 Agent">
+            <div className="rail-brand-ring"><CompassOutlined /><span>南</span></div>
           </div>
-          <Menu
-            theme="dark"
-            mode="inline"
-            selectedKeys={[selectedMenuKey(pathname)]}
-            items={menuItemsFor(user?.role, collapsed)}
-            style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}
-          />
-          <Tooltip
-            title={collapsed ? `${user?.username ?? ''}（${ROLE_LABELS[user?.role ?? ''] ?? ''}）· 点击进入个人设置` : ''}
-            placement="right"
-          >
-            <div
-              className="sider-footer"
-              style={{ cursor: 'pointer' }}
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Avatar size={30} style={{ background: '#2F54EB', fontSize: 13, flexShrink: 0 }}>
-                {avatarChar}
-              </Avatar>
-              {!collapsed ? (
-                <div style={{ minWidth: 0 }}>
-                  <div className="sider-footer-name">{user?.username ?? ''}</div>
-                  <div className="sider-footer-role">{ROLE_LABELS[user?.role ?? ''] ?? ''}</div>
-                </div>
-              ) : null}
-            </div>
-          </Tooltip>
+          <nav className="rail-nav" aria-label="主导航">
+            {menuItemsFor(user?.role).map((item) => {
+              const selected = selectedMenuKey(pathname) === item.key;
+              const icon = item.key === '/notifications' ? (
+                <Badge count={unread} size="small" offset={[5, -2]}>{item.icon}</Badge>
+              ) : item.icon;
+              return (
+                <Link key={item.key} href={item.key} className={`rail-item${selected ? ' rail-item-active' : ''}`}>
+                  <span className="rail-item-icon">{icon}</span>
+                  <span className="rail-item-label">{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+          <div className="rail-actions">
+            <button type="button" className="rail-item rail-button" onClick={() => setSettingsOpen(true)}>
+              <span className="rail-user-avatar">{avatarChar}</span>
+              <span className="rail-item-label">个人</span>
+            </button>
+            <button type="button" className="rail-item rail-button" onClick={logout}>
+              <span className="rail-item-icon"><LogoutOutlined /></span>
+              <span className="rail-item-label">退出</span>
+            </button>
+          </div>
         </div>
       </Layout.Sider>
       <Layout>
@@ -276,12 +211,6 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
           }}
         >
           <Space size={4}>
-            <Button
-              type="text"
-              aria-label={collapsed ? '展开导航' : '收起导航'}
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={toggleCollapsed}
-            />
             <Breadcrumb items={breadcrumbItems(pathname)} style={{ fontSize: 14 }} />
           </Space>
           <Space size="middle">
@@ -302,9 +231,6 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
                 <Typography.Text type="secondary">{user?.username ?? ''}</Typography.Text>
               </Space>
             </Dropdown>
-            <Button icon={<LogoutOutlined />} onClick={logout}>
-              退出
-            </Button>
           </Space>
         </Layout.Header>
         <Layout.Content style={{ padding: 24 }}>
