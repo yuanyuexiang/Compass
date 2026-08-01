@@ -165,7 +165,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       >
         <div className="sider-inner">
           <div className="rail-brand" aria-label="司南 AI 寻标 Agent">
-            <div className="rail-brand-ring"><CompassOutlined /><span>南</span></div>
+            <CompassOutlined />
           </div>
           <nav className="rail-nav" aria-label="主导航">
             {menuItemsFor(user?.role).map((item) => {
@@ -181,16 +181,6 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
               );
             })}
           </nav>
-          <div className="rail-actions">
-            <button type="button" className="rail-item rail-button" onClick={() => setSettingsOpen(true)}>
-              <span className="rail-user-avatar">{avatarChar}</span>
-              <span className="rail-item-label">个人</span>
-            </button>
-            <button type="button" className="rail-item rail-button" onClick={logout}>
-              <span className="rail-item-icon"><LogoutOutlined /></span>
-              <span className="rail-item-label">退出</span>
-            </button>
-          </div>
         </div>
       </Layout.Sider>
       <Layout>
