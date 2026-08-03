@@ -633,9 +633,55 @@ a {
 }
 
 @media (min-width: 992px) {
-  .opportunity-detail {
-    position: sticky;
-    top: 72px;
+  /* 列表—详情页使用固定工作区；两栏分别滚动，避免列表把详情一起带走。 */
+  .list-detail-layout {
+    height: calc(100vh - 96px);
+    min-height: 520px;
+  }
+
+  .list-detail-layout > .ant-col {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .list-detail-layout .opportunity-list-card,
+  .list-detail-layout .notification-inbox,
+  .list-detail-layout .opportunity-detail {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .list-detail-layout .opportunity-list-card > .ant-card-head,
+  .list-detail-layout .opportunity-detail > .ant-card-head {
+    flex: 0 0 auto;
+  }
+
+  .list-detail-layout .opportunity-list-card > .ant-card-body,
+  .list-detail-layout .opportunity-detail > .ant-card-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .list-detail-layout .notification-inbox > .ant-card-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .list-detail-layout .notification-list-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 }
 

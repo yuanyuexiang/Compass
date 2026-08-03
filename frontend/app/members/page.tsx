@@ -141,7 +141,7 @@ export default function MembersPage() {
 
   return (
     <AppLayout title="成员管理" subtitle="管理本企业的登录账号与角色">
-      <Row gutter={[16, 16]} align="top">
+      <Row gutter={[16, 16]} align="stretch" className="list-detail-layout">
         <Col xs={24} lg={9} xl={8}>
       <Card className="compass-card opportunity-list-card" title="成员列表" extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新增</Button>}>
         {error ? <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} /> : null}
@@ -162,7 +162,7 @@ export default function MembersPage() {
       </Card>
         </Col>
         <Col xs={24} lg={15} xl={16}>
-          <Card className="compass-card opportunity-detail" title={selected?.username ?? '成员详情'}>
+          <Card key={selectedId ?? 'empty'} className="compass-card opportunity-detail" title={selected?.username ?? '成员详情'}>
             {selected ? <Space direction="vertical" size={20} style={{ width: '100%' }}>
               <Descriptions column={{ xs: 1, md: 2 }}>
                 <Descriptions.Item label="用户名">{selected.username}</Descriptions.Item>

@@ -192,7 +192,7 @@ export default function TenantsPage() {
         {pendingCount > 0 ? (
           <Alert type="warning" showIcon message={`有 ${pendingCount} 个企业开通申请待审批`} />
         ) : null}
-        <Row gutter={[16, 16]} align="top">
+        <Row gutter={[16, 16]} align="stretch" className="list-detail-layout">
           <Col xs={24} lg={9} xl={8}>
             <Card className="compass-card opportunity-list-card" title={`租户列表（${items.length}）`}>
               <List<TenantAdminItem>
@@ -212,7 +212,7 @@ export default function TenantsPage() {
             </Card>
           </Col>
           <Col xs={24} lg={15} xl={16}>
-            <Card className="compass-card opportunity-detail" title={selected?.name ?? '租户详情'}>
+            <Card key={selectedId ?? 'empty'} className="compass-card opportunity-detail" title={selected?.name ?? '租户详情'}>
               {selected ? <Space direction="vertical" size={20} style={{ width: '100%' }}>
                 <Descriptions column={{ xs: 1, md: 2 }}>
                   <Descriptions.Item label="状态"><Tag color={STATUS_COLORS[selected.status] ?? 'default'}>{selected.status_label}</Tag></Descriptions.Item>

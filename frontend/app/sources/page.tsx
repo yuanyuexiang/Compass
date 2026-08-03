@@ -567,7 +567,7 @@ export default function SourcesPage() {
         </Card>
       ) : null}
 
-      <Row gutter={[16, 16]} align="top">
+      <Row gutter={[16, 16]} align="stretch" className="list-detail-layout">
         <Col xs={24} lg={9} xl={8}>
           <Card
             className="compass-card opportunity-list-card"
@@ -591,7 +591,7 @@ export default function SourcesPage() {
           </Card>
         </Col>
         <Col xs={24} lg={15} xl={16}>
-          <Card className="compass-card opportunity-detail" title={selected?.display_name ?? '数据源详情'}>
+          <Card key={selectedId ?? 'empty'} className="compass-card opportunity-detail" title={selected?.display_name ?? '数据源详情'}>
             {selected ? <Space direction="vertical" size={20} style={{ width: '100%' }}>
               <Descriptions column={{ xs: 1, md: 2 }}>
                 <Descriptions.Item label="唯一标识">{selected.name}</Descriptions.Item>

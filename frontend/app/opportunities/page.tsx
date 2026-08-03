@@ -293,7 +293,7 @@ export default function OpportunitiesPage() {
           </Typography.Text>
         </div>
 
-        <Row gutter={[16, 16]} align="top">
+        <Row gutter={[16, 16]} align="stretch" className="list-detail-layout">
           <Col xs={24} lg={9} xl={8}>
             <Card
               className="compass-card opportunity-list-card"
@@ -372,7 +372,7 @@ export default function OpportunitiesPage() {
             </Card>
           </Col>
           <Col xs={24} lg={15} xl={16}>
-            <OpportunityDetailPanel id={selectedId} />
+            <OpportunityDetailPanel key={selectedId ?? 'empty'} id={selectedId} />
           </Col>
         </Row>
       </Space>

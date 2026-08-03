@@ -64,7 +64,7 @@ export default function NotificationsPage() {
 
   return (
     <AppLayout title="通知中心" subtitle="推荐商机与系统消息，点击未读项标记为已读">
-      <Row gutter={[16, 16]} align="top">
+      <Row gutter={[16, 16]} align="stretch" className="list-detail-layout">
         <Col xs={24} lg={9} xl={8}>
       <Card className="compass-card notification-inbox" styles={{ body: { padding: 0 } }}>
         <div className="notification-inbox-head">
@@ -158,9 +158,9 @@ export default function NotificationsPage() {
         </Col>
         <Col xs={24} lg={15} xl={16}>
           {selected?.announcement_id ? (
-            <OpportunityDetailPanel id={selected.announcement_id} />
+            <OpportunityDetailPanel key={selected.id} id={selected.announcement_id} />
           ) : (
-            <Card className="compass-card opportunity-detail">
+            <Card key={selected?.id ?? 'empty'} className="compass-card opportunity-detail">
               <Empty description={selected ? '这是一条系统通知，没有关联商机' : '从左侧选择一条通知'} />
             </Card>
           )}
