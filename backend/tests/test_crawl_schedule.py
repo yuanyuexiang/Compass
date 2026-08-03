@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 
 from app.api.routes.sources import ScheduleIn
-from app.tasks.pipeline import crawl_is_due
+from app.tasks.pipeline import automatic_llm_allowed, crawl_is_due, next_automatic_llm_start
 
 NOW = datetime(2026, 7, 8, 12, 0, 0, tzinfo=UTC)
 
@@ -36,6 +36,24 @@ def test_schedule_input_bounds():
     with pytest.raises(ValueError):
         ScheduleIn(interval_minutes=721)
     assert ScheduleIn(interval_minutes=30).interval_minutes == 30
+
+
+@pytest.mark.parametrize(
+    ("hour", "minute", "allowed"),
+    [(7, 29, False), (7, 30, True), (12, 0, True), (22, 29, True), (22, 30, False)],
+)
+def test_automatic_llm_beijing_window(hour, minute, allowed):
+    from app.tasks.pipeline import BEIJING_TZ
+
+    now = datetime(2026, 7, 8, hour, minute, tzinfo=BEIJING_TZ)
+    assert automatic_llm_allowed(now) is allowed
+
+
+def test_next_automatic_llm_start_is_next_morning():
+    from app.tasks.pipeline import BEIJING_TZ
+
+    now = datetime(2026, 7, 8, 23, 0, tzinfo=BEIJING_TZ)
+    assert next_automatic_llm_start(now) == datetime(2026, 7, 8, 23, 30, tzinfo=UTC)
 
 
 def test_ensure_cst():

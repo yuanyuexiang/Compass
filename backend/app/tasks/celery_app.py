@@ -29,6 +29,11 @@ celery.conf.beat_schedule = {
         "task": "app.tasks.pipeline.pipeline_sweep",
         "schedule": crontab(minute=15),  # 每小时 :15
     },
+    # 白天分批消化夜间已完成清洗的公告，避免早晨集中调用模型。
+    "ai-backlog-tick": {
+        "task": "app.tasks.pipeline.ai_backlog_tick",
+        "schedule": crontab(minute="*/5"),
+    },
     # 系统健康告警：LLM 连败/提取积压 → 站内信通知平台管理员（任务内 6h 冷却去重）
     "health-alert": {
         "task": "app.tasks.pipeline.health_alert",

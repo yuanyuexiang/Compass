@@ -12,6 +12,13 @@ KEY_LLM_FALLBACK = "llm_fallback"  # {provider, model}，主模型失败自动�
 KEY_LAST_AUTO_CRAWL = "last_auto_crawl_at"
 DEFAULT_CRAWL_INTERVAL_MINUTES = 30
 
+# 自动 AI 流水线按北京时间运行。手动触发不受此限制。
+# 时间窗和批量值先作为安全默认值集中维护，后续可在管理端开放配置。
+AUTO_LLM_START_MINUTE = 7 * 60 + 30
+AUTO_LLM_END_MINUTE = 22 * 60 + 30
+NIGHT_CRAWL_INTERVAL_MINUTES = 240
+AUTO_LLM_BACKLOG_BATCH = 20
+
 # 每租户每日 LLM 配额（0 或负数 = 不限）；超额走降级路径而非报错，见各调用点
 KEY_QUOTA_NL_SEARCH = "quota_nl_search_daily"
 KEY_QUOTA_PROFILE_SUGGEST = "quota_profile_suggest_daily"

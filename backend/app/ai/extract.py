@@ -16,7 +16,10 @@ from app.ai.schemas import ExtractionResult
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
-MAX_INPUT_CHARS = 30_000  # 超长正文先截断（政采公告正文通常 <5K 字；map-reduce 摘要留 M2 后期）
+MAX_BODY_CHARS = 12_000
+MAX_ATTACHMENT_CHARS = 4_000
+MAX_INPUT_CHARS = MAX_BODY_CHARS + MAX_ATTACHMENT_CHARS
+MAX_OUTPUT_TOKENS = 1_400
 
 
 class ExtractionError(RuntimeError):
@@ -24,11 +27,16 @@ class ExtractionError(RuntimeError):
 
 
 def build_input(title: str, clean_text: str, attachment_texts: list[str] | None = None) -> str:
-    parts = [f"【公告标题】{title}", "【公告正文】", clean_text]
+    parts = [f"【公告标题】{title}", "【公告正文】", clean_text[:MAX_BODY_CHARS]]
+    attachment_budget = MAX_ATTACHMENT_CHARS
     for i, text in enumerate(attachment_texts or [], 1):
+        if attachment_budget <= 0:
+            break
+        excerpt = text[:attachment_budget]
         parts.append(f"【附件{i}正文】")
-        parts.append(text)
-    return "\n".join(parts)[:MAX_INPUT_CHARS]
+        parts.append(excerpt)
+        attachment_budget -= len(excerpt)
+    return "\n".join(parts)
 
 
 def extract_project(input_text: str) -> ExtractionResult:
@@ -41,6 +49,7 @@ def extract_project(input_text: str) -> ExtractionResult:
                     {"role": "user", "content": input_text},
                 ],
                 temperature=0.0,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 scene="extract",
             )
             content = resp.choices[0].message.content

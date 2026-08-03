@@ -5,7 +5,7 @@
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -38,6 +38,35 @@ from app.parsing.documents import parse_attachment
 from app.tasks.celery_app import celery
 
 logger = logging.getLogger(__name__)
+
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def automatic_llm_allowed(now: datetime | None = None) -> bool:
+    """自动 LLM 是否处于运行时间窗；传入时间可为任意时区，便于测试。"""
+    from app.core.kv import AUTO_LLM_END_MINUTE, AUTO_LLM_START_MINUTE
+
+    local = (now or datetime.now(BEIJING_TZ)).astimezone(BEIJING_TZ)
+    minute = local.hour * 60 + local.minute
+    if AUTO_LLM_START_MINUTE <= AUTO_LLM_END_MINUTE:
+        return AUTO_LLM_START_MINUTE <= minute < AUTO_LLM_END_MINUTE
+    return minute >= AUTO_LLM_START_MINUTE or minute < AUTO_LLM_END_MINUTE
+
+
+def next_automatic_llm_start(now: datetime | None = None) -> datetime:
+    """返回下一次自动 LLM 窗口起点（UTC），供跨越关窗时刻的任务安全延期。"""
+    from app.core.kv import AUTO_LLM_START_MINUTE
+
+    local = (now or datetime.now(BEIJING_TZ)).astimezone(BEIJING_TZ)
+    start = local.replace(
+        hour=AUTO_LLM_START_MINUTE // 60,
+        minute=AUTO_LLM_START_MINUTE % 60,
+        second=0,
+        microsecond=0,
+    )
+    if local >= start:
+        start += timedelta(days=1)
+    return start.astimezone(UTC)
 
 
 @celery.task(name="app.tasks.pipeline.profile_material_extract")
@@ -150,14 +179,20 @@ def crawl_tick() -> None:
         DEFAULT_CRAWL_INTERVAL_MINUTES,
         KEY_CRAWL_INTERVAL,
         KEY_LAST_AUTO_CRAWL,
+        NIGHT_CRAWL_INTERVAL_MINUTES,
         get_setting,
         set_setting,
     )
 
     now = datetime.now(UTC)
     with session_scope() as session:
-        interval = int(
+        configured_interval = int(
             get_setting(session, KEY_CRAWL_INTERVAL, DEFAULT_CRAWL_INTERVAL_MINUTES)
+        )
+        interval = (
+            configured_interval
+            if automatic_llm_allowed(now)
+            else max(configured_interval, NIGHT_CRAWL_INTERVAL_MINUTES)
         )
         if not crawl_is_due(get_setting(session, KEY_LAST_AUTO_CRAWL), interval, now):
             return
@@ -167,7 +202,7 @@ def crawl_tick() -> None:
         ).all()
     logger.info("自动采集触发（间隔 %d 分钟，%d 个源）", interval, len(source_ids))
     for sid in source_ids:
-        crawl_source_task.delay(sid)
+        crawl_source_task.delay(sid, True)
 
 
 @celery.task(name="app.tasks.pipeline.crawl_all_sources")
@@ -178,11 +213,11 @@ def crawl_all_sources() -> None:
             select(Source.id).where(Source.enabled, Source.status == SourceStatus.ACTIVE.value)
         ).all()
     for sid in source_ids:
-        crawl_source_task.delay(sid)
+        crawl_source_task.delay(sid, False)
 
 
 @celery.task(name="app.tasks.pipeline.crawl_source", max_retries=2, default_retry_delay=300)
-def crawl_source_task(source_id: int) -> None:
+def crawl_source_task(source_id: int, automatic: bool = False) -> None:
     with session_scope() as session:
         source = session.get(Source, source_id)
         if source is None or not source.enabled or source.status != SourceStatus.ACTIVE.value:
@@ -190,7 +225,7 @@ def crawl_source_task(source_id: int) -> None:
         new_ids = run_crawl_source(session, source)
         source.last_run_at = datetime.now(UTC)
     for ann_id in new_ids:
-        fetch_and_clean_task.delay(ann_id)
+        fetch_and_clean_task.delay(ann_id, automatic)
 
 
 def run_ai_extract(session: Session, announcement_id: int) -> Project:
@@ -219,10 +254,13 @@ def run_ai_extract(session: Session, announcement_id: int) -> Project:
 
 
 @celery.task(name="app.tasks.pipeline.fetch_and_clean", max_retries=2, default_retry_delay=120)
-def fetch_and_clean_task(announcement_id: int) -> None:
+def fetch_and_clean_task(announcement_id: int, automatic: bool = False) -> None:
     with session_scope() as session:
         run_fetch_and_clean(session, announcement_id)
-    ai_extract_task.delay(announcement_id)
+    if not automatic or automatic_llm_allowed():
+        ai_extract_task.delay(announcement_id, automatic)
+    else:
+        logger.info("夜间暂停自动 AI 提取，公告保留待处理 ann=%s", announcement_id)
 
 
 def run_embed_and_publish(session: Session, announcement_id: int) -> None:
@@ -240,14 +278,17 @@ def run_embed_and_publish(session: Session, announcement_id: int) -> None:
 
 
 @celery.task(name="app.tasks.pipeline.ai_extract", max_retries=2, default_retry_delay=60)
-def ai_extract_task(announcement_id: int) -> None:
+def ai_extract_task(announcement_id: int, automatic: bool = False) -> None:
+    if automatic and not automatic_llm_allowed():
+        logger.info("自动 AI 提取已越过运行时间窗，留待白天处理 ann=%s", announcement_id)
+        return
     with session_scope() as session:
         run_ai_extract(session, announcement_id)
-    publish_task.delay(announcement_id)
+    publish_task.delay(announcement_id, automatic)
 
 
 @celery.task(name="app.tasks.pipeline.publish", max_retries=2, default_retry_delay=60)
-def publish_task(announcement_id: int) -> None:
+def publish_task(announcement_id: int, automatic: bool = False) -> None:
     """发布并 fan-out 到各订阅租户做匹配（公共层→租户层的衔接点，§2 架构图）。"""
     with session_scope() as session:
         run_embed_and_publish(session, announcement_id)
@@ -273,11 +314,21 @@ def publish_task(announcement_id: int) -> None:
     for tenant_id in tenant_ids:
         if not tenant_watches_source(watched_map.get(tenant_id) or [], source_id):
             continue
-        match_project_task.delay(project, tenant_id)
+        match_project_task.delay(project, tenant_id, automatic)
 
 
 @celery.task(name="app.tasks.pipeline.match_project", max_retries=2, default_retry_delay=60)
-def match_project_task(project_id: int, tenant_id: int) -> None:
+def match_project_task(project_id: int, tenant_id: int, automatic: bool = False) -> None:
+    if automatic and not automatic_llm_allowed():
+        eta = next_automatic_llm_start()
+        match_project_task.apply_async(args=(project_id, tenant_id, True), eta=eta)
+        logger.info(
+            "夜间暂停自动商机匹配，延期至 %s project=%s tenant=%s",
+            eta.isoformat(),
+            project_id,
+            tenant_id,
+        )
+        return
     with session_scope() as session:
         match = run_match(session, project_id, tenant_id)
         if match is not None:
@@ -360,6 +411,36 @@ SWEEP_FAILED_AFTER = timedelta(hours=6)
 SWEEP_FAILED_GIVEUP = timedelta(days=7)
 
 
+@celery.task(name="app.tasks.pipeline.ai_backlog_tick")
+def ai_backlog_tick_task() -> None:
+    """白天每五分钟限量恢复夜间积压；只接管已完成清洗/附件解析的公告。"""
+    from app.core.kv import AUTO_LLM_BACKLOG_BATCH
+    from app.core.ratelimit import acquire_cooldown
+
+    if not automatic_llm_allowed() or not acquire_cooldown("ai_backlog_tick", 240):
+        return
+    with session_scope() as session:
+        announcement_ids = list(
+            session.scalars(
+                select(Announcement.id)
+                .where(
+                    Announcement.status.in_(
+                        (
+                            AnnouncementStatus.CLEANED.value,
+                            AnnouncementStatus.ATTACHMENTS_PARSED.value,
+                        )
+                    )
+                )
+                .order_by(Announcement.updated_at)
+                .limit(AUTO_LLM_BACKLOG_BATCH)
+            ).all()
+        )
+    for announcement_id in announcement_ids:
+        ai_extract_task.delay(announcement_id, True)
+    if announcement_ids:
+        logger.info("白天恢复待 AI 提取公告 %d 条", len(announcement_ids))
+
+
 @celery.task(name="app.tasks.pipeline.pipeline_sweep")
 def pipeline_sweep_task() -> None:
     """流水线自动补偿（每小时）：把卡住的公告按其所处阶段重新派发。
@@ -367,6 +448,7 @@ def pipeline_sweep_task() -> None:
     覆盖两类：①中间状态停滞超 1 小时（worker 重启/任务丢失）；②failed 超 6 小时重试
     （LLM 欠费恢复后自动消化积压），失败超 7 天放弃避免永久坏数据空转。"""
     now = datetime.now(UTC)
+    llm_allowed = automatic_llm_allowed(now)
     dispatch: list[tuple[str, int]] = []
     with session_scope() as session:
         stuck = session.scalars(
@@ -394,12 +476,14 @@ def pipeline_sweep_task() -> None:
             if ann.status == "crawled" or (ann.status == "failed" and not ann.clean_text):
                 dispatch.append(("clean", ann.id))
             elif ann.status in ("cleaned", "attachments_parsed") or ann.status == "failed":
+                if not llm_allowed:
+                    continue
                 dispatch.append(("extract", ann.id))
             else:  # ai_extracted / embedded：只差发布
                 dispatch.append(("publish", ann.id))
     tasks = {"clean": fetch_and_clean_task, "extract": ai_extract_task, "publish": publish_task}
     for kind, ann_id in dispatch:
-        tasks[kind].delay(ann_id)
+        tasks[kind].delay(ann_id, True)
     if dispatch:
         logger.info("流水线补偿：重派 %d 条（%s）", len(dispatch),
                     {k: sum(1 for x, _ in dispatch if x == k) for k in {x for x, _ in dispatch}})
