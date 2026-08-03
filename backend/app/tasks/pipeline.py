@@ -7,7 +7,7 @@
 import logging
 from datetime import UTC, datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.ai import embeddings
@@ -196,6 +196,11 @@ def crawl_tick() -> None:
         )
         if not crawl_is_due(get_setting(session, KEY_LAST_AUTO_CRAWL), interval, now):
             return
+        # 背压：AI 消化不动时不采新的（不记 last_auto_crawl，压力解除下个 tick 立即恢复）
+        reason = auto_pipeline_backpressure(session, now)
+        if reason:
+            logger.info("自动采集暂停（%s），消化后自动恢复", reason)
+            return
         set_setting(session, KEY_LAST_AUTO_CRAWL, now.isoformat())
         source_ids = session.scalars(
             select(Source.id).where(Source.enabled, Source.status == SourceStatus.ACTIVE.value)
@@ -283,6 +288,14 @@ def ai_extract_task(announcement_id: int, automatic: bool = False) -> None:
         logger.info("自动 AI 提取已越过运行时间窗，留待白天处理 ann=%s", announcement_id)
         return
     with session_scope() as session:
+        # 时效统一闸门：无论从哪条链路派发来，自动提取都不处理过期公告
+        if automatic:
+            ann = session.get(Announcement, announcement_id)
+            if ann is not None and announcement_is_stale(ann, extract_deadline()):
+                ann.status = AnnouncementStatus.SKIPPED.value
+                ann.error = SKIP_STALE_NOTE
+                logger.info("超时效放弃自动 AI 提取 ann=%s", announcement_id)
+                return
         run_ai_extract(session, announcement_id)
     publish_task.delay(announcement_id, automatic)
 
@@ -410,15 +423,104 @@ SWEEP_STUCK_AFTER = timedelta(hours=1)
 SWEEP_FAILED_AFTER = timedelta(hours=6)
 SWEEP_FAILED_GIVEUP = timedelta(days=7)
 
+SKIP_STALE_NOTE = "超过自动提取时效，已放弃（如需可手动重跑提取）"
+
+
+def extract_deadline(now: datetime | None = None) -> datetime:
+    """自动 AI 提取时效线：公告发布时间（缺失则按采集时间）早于该线的不再自动提取。
+
+    按发布时间而非采集时间判定——新接入源一次性灌入的历史公告采集时间很新、
+    发布时间很旧，正是最该整批放弃的场景。"""
+    from app.core.kv import AUTO_EXTRACT_MAX_AGE_HOURS
+
+    return (now or datetime.now(UTC)) - timedelta(hours=AUTO_EXTRACT_MAX_AGE_HOURS)
+
+
+def announcement_stale_clause(deadline: datetime):
+    """SQL 条件：公告超自动提取时效（发布时间缺失回退采集时间）。"""
+    return func.coalesce(Announcement.publish_time, Announcement.created_at) < deadline
+
+
+def announcement_is_stale(ann: Announcement, deadline: datetime) -> bool:
+    return (ann.publish_time or ann.created_at) < deadline
+
+
+def skip_stale_extract_backlog(session: Session, now: datetime | None = None) -> int:
+    """把超时效仍未提取的公告批量标 skipped（纯 UPDATE 不烧 token，幂等）。"""
+    result = session.execute(
+        update(Announcement)
+        .where(
+            Announcement.status.in_(
+                (
+                    AnnouncementStatus.CLEANED.value,
+                    AnnouncementStatus.ATTACHMENTS_PARSED.value,
+                )
+            ),
+            announcement_stale_clause(extract_deadline(now)),
+        )
+        .values(status=AnnouncementStatus.SKIPPED.value, error=SKIP_STALE_NOTE)
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount or 0
+
+
+def llm_streak_broken() -> bool:
+    """LLM 是否处于连续失败流（欠费/密钥失效等）；任一调用成功即清零自愈。"""
+    from app.core.kv import LLM_FAILURE_PAUSE_STREAK
+    from app.core.ratelimit import counter_get
+
+    return counter_get("llm_failures") >= LLM_FAILURE_PAUSE_STREAK
+
+
+def extract_backlog_count(session: Session, now: datetime | None = None) -> int:
+    """时效内待 AI 提取数量（超时效的会被自动放弃，不计入背压）。"""
+    return (
+        session.scalar(
+            select(func.count())
+            .select_from(Announcement)
+            .where(
+                Announcement.status.in_(
+                    (
+                        AnnouncementStatus.CLEANED.value,
+                        AnnouncementStatus.ATTACHMENTS_PARSED.value,
+                    )
+                ),
+                ~announcement_stale_clause(extract_deadline(now)),
+            )
+        )
+        or 0
+    )
+
+
+def auto_pipeline_backpressure(session: Session, now: datetime | None = None) -> str | None:
+    """自动流水线背压检查：AI 处理不动就别再采新的。返回暂停原因（None = 正常）。"""
+    from app.core.kv import AUTO_CRAWL_MAX_PENDING
+
+    if llm_streak_broken():
+        return "LLM 连续失败中"
+    pending = extract_backlog_count(session, now)
+    if pending >= AUTO_CRAWL_MAX_PENDING:
+        return f"待提取积压 {pending} 条已达阈值 {AUTO_CRAWL_MAX_PENDING}"
+    return None
+
 
 @celery.task(name="app.tasks.pipeline.ai_backlog_tick")
 def ai_backlog_tick_task() -> None:
-    """白天每五分钟限量恢复夜间积压；只接管已完成清洗/附件解析的公告。"""
+    """白天每五分钟限量恢复夜间积压；只接管时效内、已完成清洗/附件解析的公告。
+
+    超时效的先批量标 skipped 放弃（放弃动作不分昼夜，避免积压触发夜间误告警）。"""
     from app.core.kv import AUTO_LLM_BACKLOG_BATCH
     from app.core.ratelimit import acquire_cooldown
 
-    if not automatic_llm_allowed() or not acquire_cooldown("ai_backlog_tick", 240):
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        stale = skip_stale_extract_backlog(session, now)
+    if stale:
+        logger.info("放弃超时效待提取公告 %d 条（标 skipped）", stale)
+    if not automatic_llm_allowed(now) or not acquire_cooldown("ai_backlog_tick", 240):
         return
+    # LLM 连败时降为单条探针：不再成批送死，探针成功即清零计数、下个 tick 恢复满速
+    batch = 1 if llm_streak_broken() else AUTO_LLM_BACKLOG_BATCH
     with session_scope() as session:
         announcement_ids = list(
             session.scalars(
@@ -429,16 +531,20 @@ def ai_backlog_tick_task() -> None:
                             AnnouncementStatus.CLEANED.value,
                             AnnouncementStatus.ATTACHMENTS_PARSED.value,
                         )
-                    )
+                    ),
+                    ~announcement_stale_clause(extract_deadline(now)),
                 )
                 .order_by(Announcement.updated_at)
-                .limit(AUTO_LLM_BACKLOG_BATCH)
+                .limit(batch)
             ).all()
         )
     for announcement_id in announcement_ids:
         ai_extract_task.delay(announcement_id, True)
     if announcement_ids:
-        logger.info("白天恢复待 AI 提取公告 %d 条", len(announcement_ids))
+        if batch == 1:
+            logger.info("LLM 连续失败中，仅派发探针公告 ann=%s", announcement_ids[0])
+        else:
+            logger.info("白天恢复待 AI 提取公告 %d 条", len(announcement_ids))
 
 
 @celery.task(name="app.tasks.pipeline.pipeline_sweep")
@@ -448,7 +554,9 @@ def pipeline_sweep_task() -> None:
     覆盖两类：①中间状态停滞超 1 小时（worker 重启/任务丢失）；②failed 超 6 小时重试
     （LLM 欠费恢复后自动消化积压），失败超 7 天放弃避免永久坏数据空转。"""
     now = datetime.now(UTC)
-    llm_allowed = automatic_llm_allowed(now)
+    # 时间窗外或 LLM 连败中都不重派提取（连败恢复靠 ai_backlog_tick 的探针）
+    llm_allowed = automatic_llm_allowed(now) and not llm_streak_broken()
+    deadline = extract_deadline(now)
     dispatch: list[tuple[str, int]] = []
     with session_scope() as session:
         stuck = session.scalars(
@@ -476,6 +584,11 @@ def pipeline_sweep_task() -> None:
             if ann.status == "crawled" or (ann.status == "failed" and not ann.clean_text):
                 dispatch.append(("clean", ann.id))
             elif ann.status in ("cleaned", "attachments_parsed") or ann.status == "failed":
+                # 超时效不再自动重试提取（含 failed 重试），直接放弃省 token
+                if announcement_is_stale(ann, deadline):
+                    ann.status = AnnouncementStatus.SKIPPED.value
+                    ann.error = SKIP_STALE_NOTE
+                    continue
                 if not llm_allowed:
                     continue
                 dispatch.append(("extract", ann.id))
@@ -492,12 +605,13 @@ def pipeline_sweep_task() -> None:
 @celery.task(name="app.tasks.pipeline.health_alert")
 def health_alert_task() -> None:
     """健康告警（每 30 分钟）：LLM 连续失败 / 提取积压异常时站内信通知平台管理员，6 小时冷却。"""
+    from app.core.kv import LLM_FAILURE_PAUSE_STREAK
     from app.core.ratelimit import acquire_cooldown, counter_get, note_get
     from app.models import Notification, User
 
     problems: list[str] = []
     failures = counter_get("llm_failures")
-    if failures >= 5:
+    if failures >= LLM_FAILURE_PAUSE_STREAK:
         last = note_get("llm_last_error") or ""
         problems.append(f"LLM 连续失败 {failures} 次（可能欠费或密钥失效）。最近报错：{last}")
     with session_scope() as session:

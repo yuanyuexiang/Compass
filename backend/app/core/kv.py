@@ -18,6 +18,16 @@ AUTO_LLM_START_MINUTE = 7 * 60 + 30
 AUTO_LLM_END_MINUTE = 22 * 60 + 30
 NIGHT_CRAWL_INTERVAL_MINUTES = 240
 AUTO_LLM_BACKLOG_BATCH = 20
+# 自动 AI 提取时效：公告发布超过该时长（发布时间缺失按采集时间）仍未提取的
+# 直接标 skipped 放弃——招投标公告有强时效性，过期公告提取只烧 token 没有商机
+# 价值；新源灌入的历史公告也靠它整批拦下。手动触发不受此限制。
+AUTO_EXTRACT_MAX_AGE_HOURS = 48
+# 背压：待 AI 提取积压（时效内）达到该值时暂停自动采集，消化到阈值下自动恢复
+# ——采集快于消化没有意义，积压从源头就不该形成。手动采集不受限。
+AUTO_CRAWL_MAX_PENDING = 300
+# LLM 连续失败达该数（欠费/密钥失效等）视为"AI 处理不了"：自动采集与积压派发
+# 暂停，仅留每 tick 一条探针试探恢复（任一 LLM 调用成功即清零计数、自动恢复满速）。
+LLM_FAILURE_PAUSE_STREAK = 5
 
 # 每租户每日 LLM 配额（0 或负数 = 不限）；超额走降级路径而非报错，见各调用点
 KEY_QUOTA_NL_SEARCH = "quota_nl_search_daily"

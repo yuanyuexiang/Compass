@@ -31,6 +31,8 @@ class AnnouncementStatus(enum.StrEnum):
     EMBEDDED = "embedded"
     PUBLISHED = "published"
     FAILED = "failed"
+    # 终态：放弃自动 AI 提取（超时效或人工放弃），数据保留但不再派发、不计积压告警
+    SKIPPED = "skipped"
 
 
 class SourceStatus(enum.StrEnum):
