@@ -174,26 +174,23 @@ def crawl_is_due(last_iso: str | None, interval_minutes: int, now: datetime) -> 
 
 @celery.task(name="app.tasks.pipeline.crawl_tick")
 def crawl_tick() -> None:
-    """每分钟 tick：按管理员配置的间隔（system_settings）决定是否派发全量采集。"""
+    """每分钟 tick：按管理员配置的间隔（system_settings）决定是否派发全量采集。
+
+    原则：AI 能处理才采集——夜间关窗、LLM 连败、队列未消化完时一条都不采，
+    积压从源头不形成（公告仍挂在源站列表页上，恢复后照常采到，不丢数据）。"""
     from app.core.kv import (
         DEFAULT_CRAWL_INTERVAL_MINUTES,
         KEY_CRAWL_INTERVAL,
         KEY_LAST_AUTO_CRAWL,
-        NIGHT_CRAWL_INTERVAL_MINUTES,
         get_setting,
         set_setting,
     )
 
     now = datetime.now(UTC)
+    if not automatic_llm_allowed(now):
+        return  # AI 停机时段不采集，采了也只能攒积压
     with session_scope() as session:
-        configured_interval = int(
-            get_setting(session, KEY_CRAWL_INTERVAL, DEFAULT_CRAWL_INTERVAL_MINUTES)
-        )
-        interval = (
-            configured_interval
-            if automatic_llm_allowed(now)
-            else max(configured_interval, NIGHT_CRAWL_INTERVAL_MINUTES)
-        )
+        interval = int(get_setting(session, KEY_CRAWL_INTERVAL, DEFAULT_CRAWL_INTERVAL_MINUTES))
         if not crawl_is_due(get_setting(session, KEY_LAST_AUTO_CRAWL), interval, now):
             return
         # 背压：AI 消化不动时不采新的（不记 last_auto_crawl，压力解除下个 tick 立即恢复）
@@ -615,14 +612,19 @@ def health_alert_task() -> None:
         last = note_get("llm_last_error") or ""
         problems.append(f"LLM 连续失败 {failures} 次（可能欠费或密钥失效）。最近报错：{last}")
     with session_scope() as session:
+        # 排队本身是限速消化的常态（不报）；等超 24 小时说明消化已停摆（时间窗每天
+        # 15 小时、吞吐 3600 条/天，正常情况不可能等这么久），才是真故障。
         backlog = session.scalar(
             select(func.count()).select_from(Announcement).where(
                 Announcement.status.in_(("cleaned", "attachments_parsed")),
-                Announcement.updated_at < datetime.now(UTC) - timedelta(hours=2),
+                Announcement.updated_at < datetime.now(UTC) - timedelta(hours=24),
             )
         )
-        if backlog and backlog > 100:
-            problems.append(f"待 AI 提取积压 {backlog} 条已超 2 小时，请检查 worker 与 LLM 状态")
+        if backlog and backlog > 10:
+            problems.append(
+                f"{backlog} 条公告等待 AI 提取超 24 小时，消化可能已停摆，"
+                "请检查 beat/worker 与 LLM 状态"
+            )
         if not problems:
             return
         if not acquire_cooldown("health_alert", 6 * 3600):
