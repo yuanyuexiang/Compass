@@ -25,7 +25,10 @@ TENANT_STATUS_LABELS = {"pending": "待审批", "active": "已开通", "disabled
 @router.get("/tenants")
 def list_tenants(current: CurrentUser = PlatformAdminDep) -> dict:
     with session_scope() as session:
-        tenants = session.scalars(select(Tenant).order_by(Tenant.created_at.desc())).all()
+        # 平台租户是 admin 挂靠处，不参与业务，不出现在租户管理列表
+        tenants = session.scalars(
+            select(Tenant).where(Tenant.is_platform.is_(False)).order_by(Tenant.created_at.desc())
+        ).all()
         user_counts = dict(
             session.execute(
                 select(User.tenant_id, func.count(User.id)).group_by(User.tenant_id)
@@ -57,6 +60,12 @@ def list_tenants(current: CurrentUser = PlatformAdminDep) -> dict:
         return {"items": items, "total": len(items)}
 
 
+def _reject_platform_tenant(tenant: Tenant, action: str) -> None:
+    """平台租户是 admin 挂靠处，停用/删除会把平台管理员锁在门外，一律拒绝。"""
+    if tenant.is_platform:
+        raise HTTPException(status_code=422, detail=f"平台租户不可{action}")
+
+
 def _set_tenant_state(tenant_id: int, current: CurrentUser, *, status: str, enabled: bool) -> dict:
     if tenant_id == current.tenant_id and not enabled:
         raise HTTPException(status_code=422, detail="不能停用自己所在的租户")
@@ -64,6 +73,8 @@ def _set_tenant_state(tenant_id: int, current: CurrentUser, *, status: str, enab
         tenant = session.get(Tenant, tenant_id)
         if tenant is None:
             raise HTTPException(status_code=404, detail="租户不存在")
+        if not enabled:
+            _reject_platform_tenant(tenant, "停用")
         tenant.status = status
         tenant.enabled = enabled
     clear_block_cache()
@@ -108,6 +119,7 @@ def delete_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> di
         tenant = session.get(Tenant, tenant_id)
         if tenant is None:
             raise HTTPException(status_code=404, detail="租户不存在")
+        _reject_platform_tenant(tenant, "删除")
         if tenant.status == "active":
             raise HTTPException(status_code=422, detail="正常运营的租户请先停用，再执行删除")
         name = tenant.name

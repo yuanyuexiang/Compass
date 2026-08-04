@@ -50,6 +50,17 @@ MIGRATIONS = [
     "UPDATE tenants SET name = btrim(name, ' 　') "
     "WHERE name <> btrim(name, ' 　') "
     "AND NOT EXISTS (SELECT 1 FROM tenants x WHERE x.name = btrim(tenants.name, ' 　'))",
+    # 平台租户（幂等）：platform_admin 账号统一挂靠到独立平台租户，不再混在业务租户里。
+    # 没有平台租户则创建一个，再把所有 platform_admin 挪过去（新库/存量库通用）。
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS is_platform BOOLEAN NOT NULL DEFAULT FALSE",
+    "INSERT INTO tenants (name, enabled, status, is_platform) "
+    "SELECT '平台运营', TRUE, 'active', TRUE "
+    "WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE is_platform) "
+    "ON CONFLICT (name) DO UPDATE SET is_platform = TRUE, enabled = TRUE, status = 'active'",
+    "UPDATE users SET tenant_id = (SELECT id FROM tenants WHERE is_platform ORDER BY id LIMIT 1) "
+    "WHERE role = 'platform_admin' "
+    "AND EXISTS (SELECT 1 FROM tenants WHERE is_platform) "
+    "AND tenant_id NOT IN (SELECT id FROM tenants WHERE is_platform)",
 ]
 
 

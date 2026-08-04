@@ -31,6 +31,9 @@ class Tenant(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # pending（申请待审批）/ active（已开通）/ disabled（已停用）
     status: Mapped[str] = mapped_column(String(16), default="active")
+    # 平台租户：platform_admin 账号的挂靠处，不参与业务（不出现在租户列表、
+    # 不可停用/删除、无画像订阅不参与匹配）。全库应只有一个。
+    is_platform: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     users: Mapped[list["User"]] = relationship(back_populates="tenant")

@@ -70,6 +70,18 @@ def test_disable_own_tenant_rejected():
     assert exc.value.status_code == 422
 
 
+def test_platform_tenant_protected():
+    """平台租户（admin 挂靠处）不可停用/删除；业务租户不受影响。"""
+    from types import SimpleNamespace
+
+    from app.api.routes.admin import _reject_platform_tenant
+
+    with pytest.raises(HTTPException) as exc:
+        _reject_platform_tenant(SimpleNamespace(is_platform=True), "停用")
+    assert exc.value.status_code == 422 and "平台租户" in exc.value.detail
+    _reject_platform_tenant(SimpleNamespace(is_platform=False), "删除")  # 业务租户放行
+
+
 def test_quota_key_beijing_day():
     # UTC 2026-07-20 20:00 = 北京时间 2026-07-21 04:00，日界按北京时间
     now = datetime(2026, 7, 20, 20, 0, tzinfo=UTC)
