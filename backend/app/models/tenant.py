@@ -50,6 +50,7 @@ class User(Base):
     # platform_admin / tenant_admin / sales
     role: Mapped[str] = mapped_column(String(32), default="sales")
     email: Mapped[str | None] = mapped_column(String(128))
+    phone: Mapped[str | None] = mapped_column(String(32))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

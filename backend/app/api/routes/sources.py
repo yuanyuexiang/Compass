@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 
 from app.ai.llm_config import friendly_llm_error
+from app.core.audit import record_audit
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep, PlatformAdminDep
 from app.crawler.base import ADAPTERS
@@ -149,6 +150,10 @@ def create_source_request(body: SourceRequestIn, current: CurrentUser = CurrentU
         )
         session.add(source)
         session.flush()
+        record_audit(
+            session, current, "source.request",
+            target=f"source:{source.id} {source.display_name}", detail={"url": body.url},
+        )
         return {"ok": True, "request": _request_out(source)}
 
 
@@ -189,6 +194,10 @@ def approve_source(source_id: int, current: CurrentUser = PlatformAdminDep) -> d
             )
             if sub is not None and sub.source_ids and source.id not in sub.source_ids:
                 sub.source_ids = [*sub.source_ids, source.id]
+        record_audit(
+            session, current, "source.approve",
+            target=f"source:{source.id} {source.display_name or source.name}",
+        )
         return {"ok": True, "source": _source_out(source, 0)}
 
 
@@ -206,6 +215,11 @@ def reject_source(
         source.status = SourceStatus.REJECTED.value
         source.enabled = False
         source.reject_reason = body.reason.strip()
+        record_audit(
+            session, current, "source.reject",
+            target=f"source:{source.id} {source.display_name or source.name}",
+            detail={"reason": source.reject_reason},
+        )
         return {"ok": True}
 
 
@@ -500,6 +514,10 @@ def put_schedule(body: ScheduleIn, current: CurrentUser = PlatformAdminDep) -> d
 
     with session_scope() as session:
         set_setting(session, KEY_CRAWL_INTERVAL, body.interval_minutes)
+        record_audit(
+            session, current, "source.schedule",
+            detail={"interval_minutes": body.interval_minutes},
+        )
     return {"ok": True, "interval_minutes": body.interval_minutes}
 
 
@@ -546,6 +564,11 @@ def create_source(body: SourceIn, current: CurrentUser = PlatformAdminDep) -> di
         )
         session.add(source)
         session.flush()
+        record_audit(
+            session, current, "source.create",
+            target=f"source:{source.id} {source.display_name}",
+            detail={"adapter": body.adapter},
+        )
         return _source_out(source, 0)
 
 
@@ -565,6 +588,15 @@ def update_source(
             source.min_interval_seconds = body.min_interval_seconds
         if body.config is not None:
             source.config = body.config
+        record_audit(
+            session, current, "source.update",
+            target=f"source:{source.id} {source.display_name or source.name}",
+            detail={
+                k: v
+                for k, v in body.model_dump(exclude_none=True).items()
+                if k != "config"  # config 体积大且可能含站点细节，只记改了哪些字段
+            } | ({"config_changed": True} if body.config is not None else {}),
+        )
         return {"ok": True}
 
 
@@ -585,6 +617,10 @@ def delete_source(source_id: int, current: CurrentUser = PlatformAdminDep) -> di
                 status_code=409,
                 detail=f"该数据源已采集 {count} 条公告，为保数据完整性不可删除，请改为停用",
             )
+        record_audit(
+            session, current, "source.delete",
+            target=f"source:{source.id} {source.display_name or source.name}",
+        )
         session.delete(source)
     return {"ok": True}
 
@@ -601,6 +637,10 @@ def trigger_crawl(source_id: int, current: CurrentUser = PlatformAdminDep) -> di
             raise HTTPException(status_code=422, detail="数据源未审批生效，不能采集")
         if not source.enabled:
             raise HTTPException(status_code=422, detail="数据源已停用，请先启用")
+        record_audit(
+            session, current, "source.crawl",
+            target=f"source:{source.id} {source.display_name or source.name}",
+        )
     crawl_source_task.delay(source_id)
     return {"ok": True, "queued": True}
 
@@ -609,5 +649,7 @@ def trigger_crawl(source_id: int, current: CurrentUser = PlatformAdminDep) -> di
 def trigger_crawl_all(current: CurrentUser = PlatformAdminDep) -> dict:
     from app.tasks.pipeline import crawl_all_sources
 
+    with session_scope() as session:
+        record_audit(session, current, "source.crawl_all")
     crawl_all_sources.delay()
     return {"ok": True, "queued": True}

@@ -39,4 +39,9 @@ celery.conf.beat_schedule = {
         "task": "app.tasks.pipeline.health_alert",
         "schedule": crontab(minute="*/30"),
     },
+    # 过期日志清理：操作日志留 180 天、运行日志留 30 天（core/kv.py 常量）
+    "logs-cleanup": {
+        "task": "app.tasks.pipeline.logs_cleanup",
+        "schedule": crontab(hour=3, minute=40),
+    },
 }

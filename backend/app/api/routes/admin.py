@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from app.core.audit import record_audit
 from app.core.db import session_scope
 from app.core.kv import (
     DEFAULT_CRAWL_INTERVAL_MINUTES,
@@ -52,6 +53,7 @@ def list_tenants(current: CurrentUser = PlatformAdminDep) -> dict:
                 "has_profile": t.id in profiled,
                 "admin_username": admins[t.id].username if t.id in admins else None,
                 "admin_email": admins[t.id].email if t.id in admins else None,
+                "admin_phone": admins[t.id].phone if t.id in admins else None,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
                 "is_self": t.id == current.tenant_id,
             }
@@ -66,7 +68,9 @@ def _reject_platform_tenant(tenant: Tenant, action: str) -> None:
         raise HTTPException(status_code=422, detail=f"平台租户不可{action}")
 
 
-def _set_tenant_state(tenant_id: int, current: CurrentUser, *, status: str, enabled: bool) -> dict:
+def _set_tenant_state(
+    tenant_id: int, current: CurrentUser, *, status: str, enabled: bool, action: str = "tenant.set"
+) -> dict:
     if tenant_id == current.tenant_id and not enabled:
         raise HTTPException(status_code=422, detail="不能停用自己所在的租户")
     with session_scope() as session:
@@ -77,23 +81,30 @@ def _set_tenant_state(tenant_id: int, current: CurrentUser, *, status: str, enab
             _reject_platform_tenant(tenant, "停用")
         tenant.status = status
         tenant.enabled = enabled
+        record_audit(session, current, action, target=f"tenant:{tenant.id} {tenant.name}")
     clear_block_cache()
     return {"id": tenant_id, "status": status, "enabled": enabled}
 
 
 @router.post("/tenants/{tenant_id}/approve")
 def approve_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
-    return _set_tenant_state(tenant_id, current, status="active", enabled=True)
+    return _set_tenant_state(
+        tenant_id, current, status="active", enabled=True, action="tenant.approve"
+    )
 
 
 @router.post("/tenants/{tenant_id}/enable")
 def enable_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
-    return _set_tenant_state(tenant_id, current, status="active", enabled=True)
+    return _set_tenant_state(
+        tenant_id, current, status="active", enabled=True, action="tenant.enable"
+    )
 
 
 @router.post("/tenants/{tenant_id}/disable")
 def disable_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
-    return _set_tenant_state(tenant_id, current, status="disabled", enabled=False)
+    return _set_tenant_state(
+        tenant_id, current, status="disabled", enabled=False, action="tenant.disable"
+    )
 
 
 @router.delete("/tenants/{tenant_id}")
@@ -123,6 +134,7 @@ def delete_tenant(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> di
         if tenant.status == "active":
             raise HTTPException(status_code=422, detail="正常运营的租户请先停用，再执行删除")
         name = tenant.name
+        record_audit(session, current, "tenant.delete", target=f"tenant:{tenant_id} {name}")
         for model in (Notification, MatchResult, ProfileChunk, Subscription, CompanyProfile, User):
             session.execute(sa_delete(model).where(model.tenant_id == tenant_id))
         session.execute(
@@ -332,6 +344,11 @@ def put_llm_config(body: LlmConfigIn, current: CurrentUser = PlatformAdminDep) -
         set_setting(session, KEY_LLM_PROVIDERS, stored)
         set_setting(session, KEY_LLM_SCENE_MODELS, scene_models)
         set_setting(session, KEY_LLM_FALLBACK, fallback)
+        # 审计只记供应商名与场景映射，密钥（含密文）绝不落日志
+        record_audit(
+            session, current, "llm.config_save",
+            detail={"providers": sorted(names), "scene_models": scene_models},
+        )
     invalidate_llm_config_cache()
     return {"ok": True, "providers": len(stored)}
 
@@ -364,6 +381,65 @@ def test_llm_provider(body: LlmSceneModelIn, current: CurrentUser = PlatformAdmi
         return {"ok": True, "message": "连接正常，密钥有效"}
     except Exception as exc:  # noqa: BLE001  测试端点把异常转为结果返回
         return {"ok": False, "message": friendly_llm_error(exc) or str(exc)[:200]}
+
+
+@router.get("/audit-logs")
+def list_audit_logs(
+    tenant_id: int | None = None,
+    action: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    current: CurrentUser = PlatformAdminDep,
+) -> dict:
+    """操作日志（全平台）：按租户/动作前缀/关键词（操作者或对象）过滤，倒序分页。"""
+    from sqlalchemy import or_
+
+    from app.core.audit import audit_log_dict
+    from app.models import AuditLog
+
+    limit = max(1, min(limit, 200))
+    with session_scope() as session:
+        stmt = select(AuditLog)
+        if tenant_id is not None:
+            stmt = stmt.where(AuditLog.tenant_id == tenant_id)
+        if action:
+            stmt = stmt.where(AuditLog.action.like(f"{action}%"))
+        if q:
+            stmt = stmt.where(
+                or_(AuditLog.username.ilike(f"%{q}%"), AuditLog.target.ilike(f"%{q}%"))
+            )
+        total = session.scalar(select(func.count()).select_from(stmt.subquery()))
+        rows = session.scalars(
+            stmt.order_by(AuditLog.id.desc()).limit(limit).offset(max(0, offset))
+        ).all()
+        return {"items": [audit_log_dict(r) for r in rows], "total": total or 0}
+
+
+@router.get("/system-events")
+def list_system_events(
+    level: str | None = None,
+    event: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    current: CurrentUser = PlatformAdminDep,
+) -> dict:
+    """运行日志：流水线关键事件（采集轮次/背压/放弃积压/LLM 故障/健康告警），倒序分页。"""
+    from app.core.audit import system_event_dict
+    from app.models import SystemEvent
+
+    limit = max(1, min(limit, 200))
+    with session_scope() as session:
+        stmt = select(SystemEvent)
+        if level:
+            stmt = stmt.where(SystemEvent.level == level)
+        if event:
+            stmt = stmt.where(SystemEvent.event.like(f"{event}%"))
+        total = session.scalar(select(func.count()).select_from(stmt.subquery()))
+        rows = session.scalars(
+            stmt.order_by(SystemEvent.id.desc()).limit(limit).offset(max(0, offset))
+        ).all()
+        return {"items": [system_event_dict(r) for r in rows], "total": total or 0}
 
 
 @router.get("/usage")

@@ -5,6 +5,7 @@ export interface User {
   username: string;
   role: string;
   email?: string | null;
+  phone?: string | null;
   tenant_id: number | string;
   tenant_name: string;
 }
@@ -19,6 +20,7 @@ export interface TenantAdminItem {
   has_profile: boolean;
   admin_username: string | null;
   admin_email: string | null;
+  admin_phone: string | null;
   created_at: string | null;
   is_self: boolean;
 }
@@ -29,6 +31,7 @@ export interface MemberItem {
   role: string;
   role_label: string;
   email: string | null;
+  phone: string | null;
   enabled: boolean;
   created_at: string | null;
 }
@@ -290,4 +293,25 @@ export interface NotificationItem {
   read: boolean;
   created_at: string;
   announcement_id: number | string | null;
+}
+
+export interface AuditLogItem {
+  id: number;
+  tenant_id: number | null;
+  user_id: number | null;
+  username: string | null;
+  action: string;
+  target: string | null;
+  detail: Record<string, unknown> | null;
+  ip: string | null;
+  created_at: string | null;
+}
+
+export interface SystemEventItem {
+  id: number;
+  level: 'info' | 'warning' | 'error' | string;
+  event: string;
+  message: string;
+  detail: Record<string, unknown> | null;
+  created_at: string | null;
 }

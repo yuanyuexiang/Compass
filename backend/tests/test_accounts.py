@@ -40,6 +40,34 @@ def test_register_in_validation():
         RegisterIn(tenant_name="某某公司", username="a", password="abc12345")  # 用户名太短
     body = RegisterIn(tenant_name="某某公司", username="boss", password="abc12345")
     assert body.email is None
+    with_phone = RegisterIn(
+        tenant_name="某某公司",
+        username="boss2",
+        password="abc12345",
+        phone=" 138-0000-0000 ",
+    )
+    assert with_phone.phone == "138-0000-0000"
+    with pytest.raises(ValidationError):
+        RegisterIn(
+            tenant_name="某某公司",
+            username="boss3",
+            password="abc12345",
+            phone="13800000000x",
+        )
+
+
+def test_user_phone_validation():
+    created = UserCreateIn(
+        username="x1",
+        password="abc12345",
+        role="sales",
+        phone="+86 13800000000",
+    )
+    assert created.phone == "+86 13800000000"
+    patched = UserPatchIn(phone="")
+    assert patched.phone is None
+    with pytest.raises(ValidationError):
+        UserCreateIn(username="x2", password="abc12345", role="sales", phone="call me")
 
 
 def test_create_user_rejects_platform_admin_role():

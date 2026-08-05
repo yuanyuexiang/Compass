@@ -17,6 +17,7 @@ interface CreateForm {
   username: string;
   password: string;
   email?: string;
+  phone?: string;
   role: string;
 }
 
@@ -60,6 +61,7 @@ export default function MembersPage() {
           ...values,
           username: values.username.trim(),
           email: values.email || null,
+          phone: values.phone || null,
         }),
       });
       message.success('成员已添加');
@@ -168,6 +170,7 @@ export default function MembersPage() {
                 <Descriptions.Item label="用户名">{selected.username}</Descriptions.Item>
                 <Descriptions.Item label="角色">{selected.role_label}</Descriptions.Item>
                 <Descriptions.Item label="邮箱">{selected.email ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="手机号">{selected.phone ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="状态">{selected.enabled ? '正常' : '已停用'}</Descriptions.Item>
                 <Descriptions.Item label="创建时间">{formatDateTime(selected.created_at)}</Descriptions.Item>
               </Descriptions>
@@ -195,6 +198,9 @@ export default function MembersPage() {
           </Form.Item>
           <Form.Item name="email" label="邮箱（选填）" rules={[{ type: 'email', message: '邮箱格式不正确' }]}>
             <Input placeholder="用于接收通知" />
+          </Form.Item>
+          <Form.Item name="phone" label="手机号（选填）">
+            <Input placeholder="用于联系成员" />
           </Form.Item>
           <Form.Item name="role" label="角色">
             <Select

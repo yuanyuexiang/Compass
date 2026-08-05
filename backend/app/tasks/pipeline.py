@@ -14,6 +14,7 @@ from app.ai import embeddings
 from app.ai.extract import build_input, extract_project
 from app.ai.profile_materials import run_material_extraction
 from app.core import storage
+from app.core.audit import record_event
 from app.core.db import session_scope
 from app.crawler.base import SourceAdapter, ensure_cst, get_adapter, url_fingerprint
 from app.matching.engine import rule_filter, run_match, vector_similarity
@@ -197,11 +198,20 @@ def crawl_tick() -> None:
         reason = auto_pipeline_backpressure(session, now)
         if reason:
             logger.info("自动采集暂停（%s），消化后自动恢复", reason)
+            from app.core.ratelimit import acquire_cooldown
+
+            if acquire_cooldown("evt_backpressure", 1800):  # 每次 tick 都触发，30 分钟记一条
+                record_event(
+                    session, "backpressure.pause", f"自动采集暂停：{reason}", level="warning"
+                )
             return
         set_setting(session, KEY_LAST_AUTO_CRAWL, now.isoformat())
         source_ids = session.scalars(
             select(Source.id).where(Source.enabled, Source.status == SourceStatus.ACTIVE.value)
         ).all()
+        record_event(
+            session, "crawl.round", f"自动采集触发：间隔 {interval} 分钟，{len(source_ids)} 个源"
+        )
     logger.info("自动采集触发（间隔 %d 分钟，%d 个源）", interval, len(source_ids))
     for sid in source_ids:
         crawl_source_task.delay(sid, True)
@@ -414,6 +424,12 @@ def rematch_tenant_task(tenant_id: int) -> None:
         "画像重评估完成 tenant=%s 窗口=%d天 原始=%d 精排候选=%d 产出/更新=%d",
         tenant_id, REMATCH_WINDOW_DAYS, len(all_project_ids), len(project_ids), done,
     )
+    with session_scope() as session:
+        record_event(
+            session, "profile.rematch",
+            f"画像重评估完成：租户 {tenant_id}，"
+            f"精排候选 {len(project_ids)} 条，产出/更新 {done} 条",
+        )
 
 
 SWEEP_STUCK_AFTER = timedelta(hours=1)
@@ -512,6 +528,8 @@ def ai_backlog_tick_task() -> None:
     now = datetime.now(UTC)
     with session_scope() as session:
         stale = skip_stale_extract_backlog(session, now)
+        if stale:
+            record_event(session, "extract.skip_stale", f"放弃超时效待提取公告 {stale} 条")
     if stale:
         logger.info("放弃超时效待提取公告 %d 条（标 skipped）", stale)
     if not automatic_llm_allowed(now) or not acquire_cooldown("ai_backlog_tick", 240):
@@ -540,6 +558,14 @@ def ai_backlog_tick_task() -> None:
     if announcement_ids:
         if batch == 1:
             logger.info("LLM 连续失败中，仅派发探针公告 ann=%s", announcement_ids[0])
+            from app.core.ratelimit import acquire_cooldown
+
+            if acquire_cooldown("evt_llm_probe", 1800):
+                with session_scope() as session:
+                    record_event(
+                        session, "llm.probe",
+                        "LLM 连续失败，暂停批量派发，仅以单条探针试探恢复", level="warning",
+                    )
         else:
             logger.info("白天恢复待 AI 提取公告 %d 条", len(announcement_ids))
 
@@ -591,6 +617,9 @@ def pipeline_sweep_task() -> None:
                 dispatch.append(("extract", ann.id))
             else:  # ai_extracted / embedded：只差发布
                 dispatch.append(("publish", ann.id))
+        if dispatch:
+            counts = {k: sum(1 for x, _ in dispatch if x == k) for k in {x for x, _ in dispatch}}
+            record_event(session, "pipeline.sweep", f"流水线补偿重派 {len(dispatch)} 条：{counts}")
     tasks = {"clean": fetch_and_clean_task, "extract": ai_extract_task, "publish": publish_task}
     for kind, ann_id in dispatch:
         tasks[kind].delay(ann_id, True)
@@ -639,6 +668,7 @@ def health_alert_task() -> None:
                     body="；\n".join(problems),
                 )
             )
+        record_event(session, "health.alert", "；".join(problems), level="error")
     logger.warning("系统健康告警已发送：%s", problems)
 
 
@@ -648,3 +678,27 @@ def daily_digest_task() -> None:
         tenant_ids = session.scalars(select(Tenant.id).where(Tenant.enabled)).all()
         for tenant_id in tenant_ids:
             dispatch_daily_digest(session, tenant_id)
+
+
+@celery.task(name="app.tasks.pipeline.logs_cleanup")
+def logs_cleanup_task() -> None:
+    """每日清理过期日志：操作日志留 AUDIT_LOG_RETENTION_DAYS 天，运行日志留 30 天。"""
+    from sqlalchemy import delete as sa_delete
+
+    from app.core.kv import AUDIT_LOG_RETENTION_DAYS, SYSTEM_EVENT_RETENTION_DAYS
+    from app.models import AuditLog, SystemEvent
+
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        audits = session.execute(
+            sa_delete(AuditLog).where(
+                AuditLog.created_at < now - timedelta(days=AUDIT_LOG_RETENTION_DAYS)
+            )
+        ).rowcount
+        events = session.execute(
+            sa_delete(SystemEvent).where(
+                SystemEvent.created_at < now - timedelta(days=SYSTEM_EVENT_RETENTION_DAYS)
+            )
+        ).rowcount
+    if audits or events:
+        logger.info("日志清理：操作日志 %d 条、运行日志 %d 条", audits, events)

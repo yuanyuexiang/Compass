@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
-from app.api.routes.auth import clean_username
+from app.api.routes.auth import clean_phone, clean_username
+from app.core.audit import record_audit
 from app.core.db import session_scope
 from app.core.security import (
     AdminDep,
@@ -25,6 +26,7 @@ class UserCreateIn(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str
     email: str | None = Field(default=None, max_length=128)
+    phone: str | None = Field(default=None, max_length=32)
     role: str = "sales"
 
     @field_validator("username")
@@ -32,11 +34,22 @@ class UserCreateIn(BaseModel):
     def _clean_username(cls, v: str) -> str:
         return clean_username(v)
 
+    @field_validator("phone")
+    @classmethod
+    def _clean_phone(cls, v: str | None) -> str | None:
+        return clean_phone(v)
+
 
 class UserPatchIn(BaseModel):
     role: str | None = None
     enabled: bool | None = None
     email: str | None = Field(default=None, max_length=128)
+    phone: str | None = Field(default=None, max_length=32)
+
+    @field_validator("phone")
+    @classmethod
+    def _clean_phone(cls, v: str | None) -> str | None:
+        return clean_phone(v)
 
 
 class ResetPasswordIn(BaseModel):
@@ -50,6 +63,7 @@ def _user_out(u: User) -> dict:
         "role": u.role,
         "role_label": ROLE_LABELS.get(u.role, u.role),
         "email": u.email,
+        "phone": u.phone,
         "enabled": u.enabled,
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
@@ -89,9 +103,14 @@ def create_user(body: UserCreateIn, current: CurrentUser = AdminDep) -> dict:
             password_hash=hash_password(body.password),
             role=body.role,
             email=body.email,
+            phone=body.phone,
         )
         session.add(user)
         session.flush()
+        record_audit(
+            session, current, "user.create",
+            target=f"user:{user.id} {user.username}", detail={"role": body.role},
+        )
         return _user_out(user)
 
 
@@ -109,6 +128,13 @@ def patch_user(user_id: int, body: UserPatchIn, current: CurrentUser = AdminDep)
             user.enabled = body.enabled
         if body.email is not None:
             user.email = body.email
+        if body.phone is not None:
+            user.phone = body.phone
+        record_audit(
+            session, current, "user.update",
+            target=f"user:{user.id} {user.username}",
+            detail=body.model_dump(exclude_none=True),
+        )
         session.flush()
         result = _user_out(user)
     clear_block_cache(user_id)
@@ -122,4 +148,7 @@ def reset_password(user_id: int, body: ResetPasswordIn, current: CurrentUser = A
     with session_scope() as session:
         user = _get_member(session, user_id, current)
         user.password_hash = hash_password(body.password)
+        record_audit(
+            session, current, "user.password_reset", target=f"user:{user.id} {user.username}"
+        )
     return {"id": user_id, "message": "密码已重置"}

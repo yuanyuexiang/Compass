@@ -31,6 +31,10 @@ AUTO_CRAWL_MAX_PENDING = 50
 # 暂停，仅留每 tick 一条探针试探恢复（任一 LLM 调用成功即清零计数、自动恢复满速）。
 LLM_FAILURE_PAUSE_STREAK = 5
 
+# 日志保留天数：操作日志（追责用途）留久些，运行日志（流水线事件）滚动清理
+AUDIT_LOG_RETENTION_DAYS = 180
+SYSTEM_EVENT_RETENTION_DAYS = 30
+
 # 每租户每日 LLM 配额（0 或负数 = 不限）；超额走降级路径而非报错，见各调用点
 KEY_QUOTA_NL_SEARCH = "quota_nl_search_daily"
 KEY_QUOTA_PROFILE_SUGGEST = "quota_profile_suggest_daily"

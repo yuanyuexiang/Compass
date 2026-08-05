@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { App, Divider, Form, Input, Modal, Typography } from 'antd';
-import { LockOutlined, MailOutlined } from '@ant-design/icons';
+import { LockOutlined, MailOutlined, PhoneOutlined } from '@ant-design/icons';
 import { apiFetch } from '@/lib/api';
 import type { User } from '@/lib/types';
 
@@ -16,6 +16,7 @@ interface Props {
 
 interface FormValues {
   email?: string;
+  phone?: string;
   old_password?: string;
   new_password?: string;
   confirm?: string;
@@ -31,6 +32,7 @@ export default function SelfSettingsModal({ open, user, onClose, onUpdated }: Pr
     if (open) {
       form.setFieldsValue({
         email: user?.email ?? '',
+        phone: user?.phone ?? '',
         old_password: '',
         new_password: '',
         confirm: '',
@@ -51,7 +53,7 @@ export default function SelfSettingsModal({ open, user, onClose, onUpdated }: Pr
       }
       const updated = await apiFetch<User>('/api/me', {
         method: 'PUT',
-        body: JSON.stringify({ email: v.email ?? '' }),
+        body: JSON.stringify({ email: v.email ?? '', phone: v.phone ?? '' }),
       });
       onUpdated(updated);
       message.success(wantsPassword ? '资料已更新，密码修改成功' : '资料已更新');
@@ -84,6 +86,9 @@ export default function SelfSettingsModal({ open, user, onClose, onUpdated }: Pr
           rules={[{ type: 'email', message: '邮箱格式不正确' }]}
         >
           <Input placeholder="用于接收通知（选填）" prefix={<MailOutlined />} allowClear />
+        </Form.Item>
+        <Form.Item name="phone" label="手机号">
+          <Input placeholder="用于联系确认（选填）" prefix={<PhoneOutlined />} allowClear />
         </Form.Item>
 
         <Divider style={{ margin: '12px 0' }} />

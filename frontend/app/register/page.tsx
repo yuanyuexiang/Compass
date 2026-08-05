@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { App, Button, Card, Form, Input, Result, Typography } from 'antd';
-import { BankOutlined, CompassOutlined, LockOutlined, MailOutlined, UserOutlined } from '@ant-design/icons';
+import { BankOutlined, CompassOutlined, LockOutlined, MailOutlined, PhoneOutlined, UserOutlined } from '@ant-design/icons';
 import { apiFetch } from '@/lib/api';
 
 interface RegisterForm {
@@ -12,6 +12,7 @@ interface RegisterForm {
   password: string;
   confirm: string;
   email?: string;
+  phone?: string;
 }
 
 export default function RegisterPage() {
@@ -29,6 +30,7 @@ export default function RegisterPage() {
           username: values.username.trim(),
           password: values.password,
           email: values.email || null,
+          phone: values.phone || null,
         }),
       });
       setSubmitted(true);
@@ -88,6 +90,9 @@ export default function RegisterPage() {
               </Form.Item>
               <Form.Item name="email" rules={[{ type: 'email', message: '邮箱格式不正确' }]}>
                 <Input prefix={<MailOutlined />} placeholder="联系邮箱（选填）" autoComplete="email" />
+              </Form.Item>
+              <Form.Item name="phone">
+                <Input prefix={<PhoneOutlined />} placeholder="联系电话（选填）" autoComplete="tel" />
               </Form.Item>
               <Form.Item
                 name="password"

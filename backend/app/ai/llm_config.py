@@ -185,6 +185,19 @@ def extract_completion(
             f"{datetime.now(UTC).strftime('%m-%d %H:%M')} [{scene}] {target['model']} → "
             f"{fallback['model']}",
         )
+        try:  # 运行日志（尽力而为，DB 故障不影响 LLM 主链路）
+            from app.core.audit import record_event
+            from app.core.db import session_scope
+
+            with session_scope() as s:
+                record_event(
+                    s, "llm.fallback",
+                    f"主模型 {target['model']} 失败，"
+                    f"已切换备用 {fallback['model']}（场景 {scene}）",
+                    level="warning",
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("llm.fallback 事件记录失败", exc_info=True)
     counter_reset("llm_failures")
     _record_usage(scene, tenant_id, resp)
     return resp

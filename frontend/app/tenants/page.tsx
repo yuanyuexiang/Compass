@@ -106,6 +106,11 @@ export default function TenantsPage() {
               {rec.admin_email}
             </Typography.Text>
           ) : null}
+          {rec.admin_phone ? (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {rec.admin_phone}
+            </Typography.Text>
+          ) : null}
         </Space>
       ),
     },
@@ -219,6 +224,7 @@ export default function TenantsPage() {
                   <Descriptions.Item label="成员数">{selected.user_count}</Descriptions.Item>
                   <Descriptions.Item label="管理员">{selected.admin_username ?? '-'}</Descriptions.Item>
                   <Descriptions.Item label="管理员邮箱">{selected.admin_email ?? '-'}</Descriptions.Item>
+                  <Descriptions.Item label="管理员手机号">{selected.admin_phone ?? '-'}</Descriptions.Item>
                   <Descriptions.Item label="企业画像">{selected.has_profile ? '已配置' : '未配置'}</Descriptions.Item>
                   <Descriptions.Item label="申请时间">{formatDateTime(selected.created_at)}</Descriptions.Item>
                 </Descriptions>

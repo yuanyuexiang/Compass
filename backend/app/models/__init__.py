@@ -1,3 +1,4 @@
+from app.models.logs import AuditLog, SystemEvent
 from app.models.public import (
     Announcement,
     AnnouncementStatus,
@@ -25,6 +26,8 @@ __all__ = [
     "Announcement",
     "AnnouncementStatus",
     "Attachment",
+    "AuditLog",
+    "SystemEvent",
     "CompanyProfile",
     "LlmUsage",
     "MatchResult",

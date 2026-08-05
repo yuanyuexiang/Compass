@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, func, select
 
 from app.ai import websearch
 from app.ai.llm_config import friendly_llm_error
@@ -16,6 +16,7 @@ from app.ai.nl_search import parse_query
 from app.ai.profile_materials import ProjectCaseValue, project_confirmed_case
 from app.ai.profile_suggest import suggest_profile
 from app.core import storage
+from app.core.audit import record_audit
 from app.core.db import session_scope
 from app.core.kv import (
     DEFAULT_QUOTA_NL_SEARCH,
@@ -25,7 +26,7 @@ from app.core.kv import (
     get_setting,
 )
 from app.core.ratelimit import acquire_cooldown, try_consume_quota
-from app.core.security import CurrentUser, CurrentUserDep
+from app.core.security import AdminDep, CurrentUser, CurrentUserDep
 from app.matching.engine import parse_budget_yuan
 from app.matching.profiles import (
     get_filter_regions,
@@ -110,6 +111,10 @@ def follow(match_id: int, body: FollowIn, current: CurrentUser = CurrentUserDep)
         if match is None or match.tenant_id != current.tenant_id:
             raise HTTPException(status_code=404, detail="记录不存在")
         match.follow_status = body.status
+        record_audit(
+            session, current, "follow.update",
+            target=f"match:{match_id}", detail={"status": body.status},
+        )
         return {"ok": True}
 
 
@@ -155,6 +160,11 @@ def put_profile(body: dict, current: CurrentUser = CurrentUserDep) -> dict:
             else None
         )
         upsert_profile(session, current.tenant_id, data)
+        if old != data:
+            changed = sorted(
+                k for k in EMPTY_PROFILE if (old or {}).get(k) != data.get(k)
+            )
+            record_audit(session, current, "profile.save", detail={"changed": changed})
     if old == data:
         return {"ok": True, "rematch": "unchanged"}
     return {"ok": True, "rematch": _queue_profile_rematch(current.tenant_id)}
@@ -283,6 +293,10 @@ async def upload_profile_material(
         session.add(material)
         session.flush()
         material_id = material.id
+        record_audit(
+            session, current, "material.upload",
+            target=f"material:{material_id} {filename}",
+        )
     if parsed_text and not needs_ocr:
         try:
             from app.tasks.pipeline import profile_material_extract_task
@@ -345,6 +359,10 @@ def delete_profile_material(material_id: int, current: CurrentUser = CurrentUser
                         fact.source_strength = "tenant_confirmed"
                 elif not has_other_evidence:
                     session.delete(fact)
+        record_audit(
+            session, current, "material.delete",
+            target=f"material:{material_id} {material.filename}",
+        )
         session.delete(material)
     if object_key:
         storage.delete_object(object_key)
@@ -419,6 +437,7 @@ def confirm_profile_fact(
         fact.confirmed_by = current.user_id
         fact.confirmed_at = datetime.now(UTC)
         project_confirmed_case(session, fact, value)
+        record_audit(session, current, "fact.confirm", target=f"fact:{fact_id}")
     return {"ok": True, "rematch": _queue_profile_rematch(current.tenant_id)}
 
 
@@ -433,6 +452,7 @@ def reject_profile_fact(fact_id: int, current: CurrentUser = CurrentUserDep) -> 
         fact.status = "rejected"
         fact.confirmed_by = current.user_id
         fact.confirmed_at = datetime.now(UTC)
+        record_audit(session, current, "fact.reject", target=f"fact:{fact_id}")
     return {"ok": True}
 
 
@@ -479,7 +499,43 @@ def put_subscriptions(body: dict, current: CurrentUser = CurrentUserDep) -> dict
         sub.channels = body.get("channels") or {}
         # 关注的数据源：只收合法 int id；空列表 = 不限
         sub.source_ids = [int(i) for i in (body.get("source_ids") or []) if str(i).isdigit()]
+        # channels 含 webhook/邮箱地址，审计只记开启了哪些渠道
+        record_audit(
+            session, current, "subscription.save",
+            detail={
+                "min_star": sub.min_star,
+                "immediate": sub.immediate,
+                "daily_digest": sub.daily_digest,
+                "channels_enabled": sorted(
+                    k for k, v in (sub.channels or {}).items() if v.get("enabled")
+                ),
+                "source_ids": sub.source_ids,
+            },
+        )
         return {"ok": True}
+
+
+@router.get("/tenant/audit-logs")
+def tenant_audit_logs(
+    action: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    current: CurrentUser = AdminDep,
+) -> dict:
+    """本租户操作日志（tenant_admin 可查本企业成员的操作，强制 tenant_id 隔离）。"""
+    from app.core.audit import audit_log_dict
+    from app.models import AuditLog
+
+    limit = max(1, min(limit, 200))
+    with session_scope() as session:
+        stmt = select(AuditLog).where(AuditLog.tenant_id == current.tenant_id)
+        if action:
+            stmt = stmt.where(AuditLog.action.like(f"{action}%"))
+        total = session.scalar(select(func.count()).select_from(stmt.subquery()))
+        rows = session.scalars(
+            stmt.order_by(AuditLog.id.desc()).limit(limit).offset(max(0, offset))
+        ).all()
+        return {"items": [audit_log_dict(r) for r in rows], "total": total or 0}
 
 
 @router.get("/notifications")

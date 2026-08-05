@@ -12,6 +12,7 @@ import {
   CloudDownloadOutlined,
   CompassOutlined,
   DashboardOutlined,
+  FileTextOutlined,
   HomeOutlined,
   IdcardOutlined,
   LogoutOutlined,
@@ -34,6 +35,8 @@ const MENU_ITEMS = [
 
 const ADMIN_MENU_ITEMS = [
   { key: '/members', icon: <TeamOutlined />, label: '成员' },
+  // 平台管理员看全平台操作日志+运行日志；租户管理员只看本租户操作日志
+  { key: '/logs', icon: <FileTextOutlined />, label: '日志' },
 ];
 
 // 采集源全局共享，增改/启停会影响所有租户 → 采集管理仅平台管理员可见
@@ -69,6 +72,7 @@ const PAGE_LABELS: Record<string, string> = {
   '/settings': '订阅设置',
   '/notifications': '通知中心',
   '/members': '成员管理',
+  '/logs': '日志',
   '/sources': '采集管理',
   '/models': '模型服务',
   '/tenants': '租户管理',
