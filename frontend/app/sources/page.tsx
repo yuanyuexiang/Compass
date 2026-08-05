@@ -567,15 +567,16 @@ export default function SourcesPage() {
         </Card>
       ) : null}
 
-      <Row gutter={[16, 16]} align="stretch" className="list-detail-layout">
+      <Row gutter={[16, 16]} align="stretch" className="list-detail-layout sources-list-detail-layout">
         <Col xs={24} lg={9} xl={8}>
           <Card
-            className="compass-card opportunity-list-card"
+            className="compass-card opportunity-list-card sources-list-card"
             title={`数据源（${listedItems.length}）`}
             extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => openModal(null)}>新增</Button>}
           >
             <Button block icon={<CloudDownloadOutlined />} onClick={() => triggerCrawl()} style={{ marginBottom: 12 }}>全部采集</Button>
             <List<SourceItem>
+              className="sources-list-scroll"
               loading={loading}
               dataSource={listedItems}
               locale={{ emptyText: <Empty description="暂无数据源" /> }}

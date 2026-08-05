@@ -665,10 +665,15 @@ a {
 }
 
 @media (min-width: 992px) {
-  /* 列表—详情页使用固定工作区；两栏分别滚动，避免列表把详情一起带走。 */
+  /* 列表—详情页限制在可视区内；页面上方还有标题，不能直接只扣 96px。 */
   .list-detail-layout {
-    height: calc(100vh - 96px);
-    min-height: 520px;
+    height: clamp(320px, calc(100dvh - 176px), 720px);
+    min-height: 0;
+  }
+
+  /* 采集页在双栏上方还有调度卡片，需扣除真实顶部占用，避免工作区伸出视口。 */
+  .sources-list-detail-layout {
+    height: clamp(320px, calc(100dvh - 249px), 720px);
   }
 
   .list-detail-layout > .ant-col {
@@ -696,7 +701,20 @@ a {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  /* 采集按钮固定在顶部，只让数据源列表滚动，末项不会被卡片底部裁掉。 */
+  .list-detail-layout .sources-list-card > .ant-card-body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sources-list-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
     scrollbar-gutter: stable;
   }
 
@@ -712,7 +730,6 @@ a {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    overscroll-behavior: contain;
     scrollbar-gutter: stable;
   }
 }
