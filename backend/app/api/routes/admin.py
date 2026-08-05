@@ -16,7 +16,17 @@ from app.core.kv import (
 )
 from app.core.ratelimit import counter_get, note_get
 from app.core.security import CurrentUser, PlatformAdminDep, clear_block_cache
-from app.models import Announcement, CompanyProfile, LlmUsage, Source, SourceStatus, Tenant, User
+from app.models import (
+    Announcement,
+    CompanyProfile,
+    LlmUsage,
+    MatchResult,
+    Source,
+    SourceStatus,
+    Subscription,
+    Tenant,
+    User,
+)
 
 router = APIRouter(prefix="/api/admin")
 
@@ -60,6 +70,66 @@ def list_tenants(current: CurrentUser = PlatformAdminDep) -> dict:
             for t in tenants
         ]
         return {"items": items, "total": len(items)}
+
+
+@router.get("/tenants/{tenant_id}")
+def tenant_detail(tenant_id: int, current: CurrentUser = PlatformAdminDep) -> dict:
+    """平台运营视角的租户详情；通知配置仅返回开关，不泄露地址或 webhook。"""
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    with session_scope() as session:
+        tenant = session.get(Tenant, tenant_id)
+        if tenant is None or tenant.is_platform:
+            raise HTTPException(status_code=404, detail="租户不存在")
+        profile = session.scalar(
+            select(CompanyProfile).where(CompanyProfile.tenant_id == tenant_id)
+        )
+        subscription = session.scalar(
+            select(Subscription).where(Subscription.tenant_id == tenant_id)
+        )
+        profile_data = profile.data if profile else {}
+        fillable = (
+            "description", "products", "services", "industries", "regions",
+            "certifications", "brands", "cases_text",
+        )
+        filled = sum(bool(profile_data.get(key)) for key in fillable)
+        profile_filter = profile_data.get("filter") or {}
+        filled += bool(profile_filter.get("regions") or profile_filter.get("min_budget"))
+        channels = subscription.channels if subscription else {}
+        enabled_channels = sorted(
+            key for key, value in (channels or {}).items()
+            if isinstance(value, dict) and value.get("enabled")
+        )
+        match_rows = dict(
+            session.execute(
+                select(MatchResult.follow_status, func.count(MatchResult.id))
+                .where(MatchResult.tenant_id == tenant_id, MatchResult.created_at >= cutoff)
+                .group_by(MatchResult.follow_status)
+            ).all()
+        )
+        member_count = session.scalar(
+            select(func.count()).select_from(User).where(User.tenant_id == tenant_id)
+        ) or 0
+        recommendation_count = sum(match_rows.values())
+        return {
+            "id": tenant.id,
+            "profile": profile_data,
+            "profile_updated_at": profile.updated_at.isoformat() if profile else None,
+            "profile_completeness": round(filled * 100 / 9),
+            "subscription": {
+                "min_star": subscription.min_star if subscription else 4,
+                "immediate": subscription.immediate if subscription else True,
+                "daily_digest": subscription.daily_digest if subscription else True,
+                "source_count": len(subscription.source_ids or []) if subscription else 0,
+                "source_scope_all": not bool(subscription and subscription.source_ids),
+                "enabled_channels": enabled_channels,
+            },
+            "activity_30d": {
+                "members": member_count,
+                "recommendations": recommendation_count,
+                "following": match_rows.get("跟进中", 0),
+                "bid": match_rows.get("已投标", 0),
+            },
+        }
 
 
 def _reject_platform_tenant(tenant: Tenant, action: str) -> None:

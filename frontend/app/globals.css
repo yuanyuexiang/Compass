@@ -558,6 +558,38 @@ a {
   padding: 14px;
 }
 
+.tenant-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tenant-profile-progress {
+  display: grid;
+  grid-template-columns: auto minmax(140px, 280px) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tenant-detail-label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 13px;
+}
+
+.tenant-account-section {
+  padding-top: 18px;
+  border-top: 1px solid #f0f0f0;
+}
+
+@media (max-width: 767px) {
+  .tenant-profile-progress {
+    grid-template-columns: 1fr;
+  }
+}
+
 .opportunity-list-item {
   position: relative;
   margin-bottom: 6px;

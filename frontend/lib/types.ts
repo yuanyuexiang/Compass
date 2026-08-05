@@ -25,6 +25,37 @@ export interface TenantAdminItem {
   is_self: boolean;
 }
 
+export interface TenantAdminDetail {
+  id: number;
+  profile: {
+    description?: string;
+    products?: string[];
+    services?: string[];
+    industries?: string[];
+    regions?: string[];
+    certifications?: string[];
+    brands?: string[];
+    cases_text?: string;
+    filter?: { regions?: string[]; min_budget?: number | null };
+  };
+  profile_updated_at: string | null;
+  profile_completeness: number;
+  subscription: {
+    min_star: number;
+    immediate: boolean;
+    daily_digest: boolean;
+    source_count: number;
+    source_scope_all: boolean;
+    enabled_channels: string[];
+  };
+  activity_30d: {
+    members: number;
+    recommendations: number;
+    following: number;
+    bid: number;
+  };
+}
+
 export interface MemberItem {
   id: number;
   username: string;
