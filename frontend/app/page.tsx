@@ -212,6 +212,118 @@ function HealthCell({
   );
 }
 
+function DiagnosisCard({
+  title,
+  description,
+  href,
+  tag,
+  tone = 'blue',
+}: {
+  title: string;
+  description: string;
+  href: string;
+  tag: string;
+  tone?: string;
+}) {
+  return (
+    <Link href={href}>
+      <div
+        style={{
+          height: '100%',
+          padding: 14,
+          border: '1px solid #F0F0F0',
+          borderRadius: 8,
+          background: '#fff',
+          color: 'rgba(0, 0, 0, 0.88)',
+        }}
+      >
+        <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Typography.Text strong>{title}</Typography.Text>
+          <Tag color={tone} style={{ marginInlineEnd: 0 }}>{tag}</Tag>
+        </Space>
+        <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0', fontSize: 13 }}>
+          {description}
+        </Typography.Paragraph>
+      </div>
+    </Link>
+  );
+}
+
+function OperationsAdvice({ health }: { health: HealthData }) {
+  const items: Array<{
+    title: string;
+    description: string;
+    href: string;
+    tag: string;
+    tone?: string;
+  }> = [];
+  const backlogTotal = Object.values(health.backlog).reduce((a, b) => a + b, 0);
+  if (!health.llm.ok) {
+    items.push({
+      title: '排查模型服务',
+      description: '优先检查 extract 场景模型、供应商余额和 API Key；恢复后观察待提取队列是否继续消化。',
+      href: '/models',
+      tag: `失败 ${health.llm.consecutive_failures}`,
+      tone: 'red',
+    });
+  }
+  if (!health.scheduler.ok) {
+    items.push({
+      title: '检查采集调度',
+      description: '确认 beat/worker 正常运行，并检查白天自动采集窗口与最近一次自动采集时间。',
+      href: '/logs',
+      tag: '调度',
+      tone: 'orange',
+    });
+  }
+  if (health.stale_sources.length) {
+    items.push({
+      title: '处理异常采集源',
+      description: '进入采集管理查看源站最近运行时间；必要时手动测试采集或调整选择器。',
+      href: '/sources',
+      tag: `${health.stale_sources.length} 个源`,
+      tone: 'orange',
+    });
+  }
+  if (backlogTotal) {
+    items.push({
+      title: '观察积压消化',
+      description: '模型恢复后，关注 backlog tick 是否持续派发；旧公告可按时效策略归档跳过。',
+      href: '/logs',
+      tag: `${backlogTotal} 待处理`,
+      tone: 'gold',
+    });
+  }
+  if (!items.length) {
+    items.push(
+      {
+        title: '查看运行日志',
+        description: '系统暂无明显异常，建议定期检查采集轮次、模型备用切换和健康告警记录。',
+        href: '/logs',
+        tag: '巡检',
+      },
+      {
+        title: '复核模型用量',
+        description: '关注不同场景的调用量和 token 消耗，及时发现异常放量或配置不合理。',
+        href: '/models',
+        tag: '成本',
+      },
+    );
+  }
+  return (
+    <div style={{ marginTop: 12 }}>
+      <Typography.Text strong>异常诊断</Typography.Text>
+      <Row gutter={[12, 12]} style={{ marginTop: 10 }}>
+        {items.slice(0, 4).map((item) => (
+          <Col xs={24} md={12} key={item.title}>
+            <DiagnosisCard {...item} />
+          </Col>
+        ))}
+      </Row>
+    </div>
+  );
+}
+
 function HealthPanel({ health }: { health: HealthData | null }) {
   if (!health) {
     return (
@@ -291,6 +403,7 @@ function HealthPanel({ health }: { health: HealthData | null }) {
           </HealthCell>
         </Col>
       </Row>
+      <OperationsAdvice health={health} />
     </Card>
   );
 }
