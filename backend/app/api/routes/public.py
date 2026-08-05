@@ -6,7 +6,18 @@ from sqlalchemy import func, select
 from app.core.db import session_scope
 from app.core.security import CurrentUser, CurrentUserDep
 from app.matching.profiles import get_filter_regions, get_watched_source_ids, region_filter_clause
-from app.models import Announcement, MatchResult, Notification, Project
+from app.models import (
+    Announcement,
+    CompanyProfile,
+    MatchResult,
+    Notification,
+    Project,
+    Source,
+    SourceStatus,
+    Subscription,
+    Tenant,
+    User,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -132,11 +143,57 @@ def stats(current: CurrentUser = CurrentUserDep) -> dict:
             "tenant": {"today_recommended": today_recommended, "unread": unread},
         }
         if current.role == "platform_admin":
+            pending_tenants = session.scalar(
+                select(func.count()).select_from(Tenant).where(Tenant.status == "pending")
+            )
+            pending_sources = session.scalar(
+                select(func.count()).select_from(Source).where(
+                    Source.status == SourceStatus.PENDING.value
+                )
+            )
+            active_sources = session.scalar(
+                select(func.count()).select_from(Source).where(
+                    Source.enabled, Source.status == SourceStatus.ACTIVE.value
+                )
+            )
+            tenants_total = session.scalar(
+                select(func.count()).select_from(Tenant).where(Tenant.is_platform.is_(False))
+            )
+            users_total = session.scalar(select(func.count()).select_from(User))
             out["by_status"] = dict(
                 session.execute(
                     select(Announcement.status, func.count()).group_by(Announcement.status)
                 ).all()
             )
+            out["platform"] = {
+                "pending_tenants": pending_tenants,
+                "pending_sources": pending_sources,
+                "active_sources": active_sources,
+                "tenants_total": tenants_total,
+                "users_total": users_total,
+            }
+        else:
+            members_total = session.scalar(
+                select(func.count()).select_from(User).where(User.tenant_id == current.tenant_id)
+            )
+            profile = session.scalar(
+                select(CompanyProfile).where(CompanyProfile.tenant_id == current.tenant_id)
+            )
+            subscription = session.scalar(
+                select(Subscription).where(Subscription.tenant_id == current.tenant_id)
+            )
+            profile_data = profile.data if profile else {}
+            # 完整度只统计用户可填字段：name 强制为租户名恒有值、filter 是 dict 恒 truthy，
+            # 直接计入会虚高——filter 按其内部 regions/min_budget 是否填过判定
+            fields = [k for k in profile_data if k not in ("name", "filter")]
+            filled = sum(1 for k in fields if profile_data.get(k))
+            flt = profile_data.get("filter") or {}
+            fields.append("filter")
+            filled += 1 if (flt.get("regions") or flt.get("min_budget")) else 0
+            out["tenant"] |= {
+                "members_total": members_total,
+                "profile_completeness": round(filled * 100 / max(len(fields), 1)),
+                "subscribed_sources": len(subscription.source_ids or []) if subscription else 0,
+                "source_scope_all": not bool(subscription and subscription.source_ids),
+            }
         return out
-
-

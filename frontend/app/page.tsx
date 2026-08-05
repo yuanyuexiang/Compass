@@ -6,6 +6,7 @@ import {
   Alert,
   App,
   Badge,
+  Button,
   Card,
   Col,
   Empty,
@@ -23,6 +24,7 @@ import {
   BellOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  CloudDownloadOutlined,
   CloseCircleOutlined,
   DatabaseOutlined,
   EnvironmentOutlined,
@@ -32,9 +34,9 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getCachedUser } from '@/lib/api';
 import { FOLLOW_STATUSES, RISK_KEYS, RISK_LABELS, formatBudget, pipelineStatusLabel } from '@/lib/labels';
-import type { Advice, FollowStatus, Recommendation, Stats } from '@/lib/types';
+import type { Advice, FollowStatus, Recommendation, Stats, User } from '@/lib/types';
 
 /** 系统健康（GET /api/admin/health，仅平台管理员） */
 interface HealthData {
@@ -160,6 +162,67 @@ function PipelineBar({ byStatus }: { byStatus: Record<string, number> }) {
         );
       })}
     </div>
+  );
+}
+
+function HealthPanel({ health }: { health: HealthData | null }) {
+  if (!health) {
+    return (
+      <Card className="compass-card" title="系统健康" size="small">
+        <Skeleton active paragraph={{ rows: 2 }} />
+      </Card>
+    );
+  }
+  return (
+    <Card className="compass-card" title="系统健康" size="small">
+      <Space size={[24, 10]} wrap align="center">
+        <Space size={6}>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>AI 服务</Typography.Text>
+          {health.llm.ok ? (
+            <Tag icon={<CheckCircleOutlined />} color="green">正常</Tag>
+          ) : (
+            <Tooltip title={health.llm.last_error ?? ''}>
+              <Tag icon={<CloseCircleOutlined />} color="red">
+                连续失败 {health.llm.consecutive_failures} 次
+              </Tag>
+            </Tooltip>
+          )}
+          {health.llm.fallback_last ? (
+            <Tooltip title={health.llm.fallback_last}>
+              <Tag icon={<WarningOutlined />} color="orange">启用过备用模型</Tag>
+            </Tooltip>
+          ) : null}
+        </Space>
+        <Space size={6}>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>采集调度</Typography.Text>
+          {health.scheduler.ok ? (
+            <Tag icon={<CheckCircleOutlined />} color="green">正常</Tag>
+          ) : (
+            <Tag icon={<WarningOutlined />} color="orange">疑似停摆</Tag>
+          )}
+        </Space>
+        <Typography.Text style={{ fontSize: 13 }}>
+          24h：采集 {health.last_24h.crawled} · 发布 {health.last_24h.published} · 失败{' '}
+          {health.last_24h.failed}
+        </Typography.Text>
+        {Object.keys(health.backlog).length ? (
+          <Space size={6} wrap>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>积压</Typography.Text>
+            {Object.entries(health.backlog).map(([s, n]) => (
+              <Tag key={s} color="gold">{pipelineStatusLabel(s)} {n}</Tag>
+            ))}
+          </Space>
+        ) : null}
+        {health.failed_total ? <Tag color="red">累计失败 {health.failed_total}</Tag> : null}
+        {health.stale_sources.length ? (
+          <Tooltip title={health.stale_sources.map((s) => s.name).join('、')}>
+            <Tag icon={<WarningOutlined />} color="orange">
+              {health.stale_sources.length} 个源 48h 无新公告
+            </Tag>
+          </Tooltip>
+        ) : null}
+      </Space>
+    </Card>
   );
 }
 
@@ -379,6 +442,15 @@ function CompactRecRow({
 
 export default function DashboardPage() {
   const { message } = App.useApp();
+  // 页面按角色整体分叉，角色须在挂载后从 localStorage 解析（undefined = 未解析）——
+  // 渲染期直接读会让静态预渲染的 HTML 与客户端首帧不一致，触发 hydration 报错
+  const [user, setUser] = useState<User | null>();
+  useEffect(() => {
+    setUser(getCachedUser<User>() ?? null);
+  }, []);
+  const resolved = user !== undefined;
+  const isPlatform = user?.role === 'platform_admin';
+  const isTenantAdmin = user?.role === 'tenant_admin';
   const [stats, setStats] = useState<Stats | null>(null);
   const [recs, setRecs] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -388,20 +460,24 @@ export default function DashboardPage() {
   const [health, setHealth] = useState<HealthData | null>(null);
 
   useEffect(() => {
+    if (!resolved) return;
     apiFetch<Stats>('/api/stats')
       .then((s) => {
         setStats(s);
-        // by_status 仅平台管理员返回 → 同一身份才拉系统健康
-        if (s.by_status) {
+        if (isPlatform) {
           apiFetch<HealthData>('/api/admin/health').then(setHealth).catch(() => {});
         }
       })
       .catch(() => {
         // 统计加载失败时保持空态展示
       });
-  }, []);
+  }, [resolved, isPlatform]);
 
   const loadRecs = useCallback(async (star: number) => {
+    if (!resolved || isPlatform) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -415,7 +491,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [resolved, isPlatform]);
 
   useEffect(() => {
     loadRecs(minStar);
@@ -443,12 +519,104 @@ export default function DashboardPage() {
     return { heroes: picked, rest: recs.filter((r) => !heroIds.has(r.id)) };
   }, [recs]);
 
-  // by_status 仅平台管理员返回：有 → 展示全局总量与流水线；无 → 展示租户口径的可见公告数
+  // by_status 仅平台管理员返回，用于运营工作台展示流水线。
   const byStatus = stats?.by_status;
-  const totalAnnouncements = Object.values(byStatus ?? {}).reduce((a, b) => a + b, 0);
+
+  // 角色未解析：服务端预渲染与客户端首帧都走这里，两侧一致不触发 hydration 告警
+  if (!resolved) {
+    return (
+      <AppLayout title="工作台" subtitle="加载中…">
+        <Card className="compass-card">
+          <Skeleton active paragraph={{ rows: 6 }} />
+        </Card>
+      </AppLayout>
+    );
+  }
+
+  if (isPlatform) {
+    return (
+      <AppLayout title="运营工作台" subtitle="平台健康、审批、采集与模型运行状态">
+        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+          <Col xs={24} sm={12} lg={6}>
+            <StatTile
+              label="待审批租户"
+              value={stats?.platform?.pending_tenants ?? '—'}
+              helper="企业开通申请"
+              icon={<CheckCircleOutlined />}
+              iconBg="rgba(47, 84, 235, 0.08)"
+              iconColor="#2F54EB"
+            />
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <StatTile
+              label="待审批数据源"
+              value={stats?.platform?.pending_sources ?? '—'}
+              helper="租户提交的新源申请"
+              icon={<CloudDownloadOutlined />}
+              iconBg="rgba(250, 173, 20, 0.12)"
+              iconColor="#D48806"
+            />
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <StatTile
+              label="活跃数据源"
+              value={stats?.platform?.active_sources ?? '—'}
+              helper="当前参与自动采集"
+              icon={<DatabaseOutlined />}
+              iconBg="rgba(82, 196, 26, 0.12)"
+              iconColor="#389E0D"
+            />
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <StatTile
+              label="平台用户"
+              value={stats?.platform?.users_total ?? '—'}
+              helper={`${stats?.platform?.tenants_total ?? '—'} 个业务租户`}
+              icon={<BellOutlined />}
+              iconBg="rgba(114, 46, 209, 0.10)"
+              iconColor="#722ED1"
+            />
+          </Col>
+        </Row>
+
+        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+          <Col xs={24} xl={16}>
+            <HealthPanel health={health} />
+          </Col>
+          <Col xs={24} xl={8}>
+            <Card className="compass-card" title="优先处理" size="small">
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Link href="/tenants">
+                  <Button block type={stats?.platform?.pending_tenants ? 'primary' : 'default'}>
+                    审批企业开通
+                  </Button>
+                </Link>
+                <Link href="/sources">
+                  <Button block>检查采集源与申请</Button>
+                </Link>
+                <Link href="/models">
+                  <Button block>查看模型服务</Button>
+                </Link>
+                <Link href="/logs">
+                  <Button block>查看运行日志</Button>
+                </Link>
+              </Space>
+            </Card>
+          </Col>
+        </Row>
+
+        <Card className="compass-card" title="处理流水线" size="small">
+          <PipelineBar byStatus={byStatus ?? {}} />
+        </Card>
+      </AppLayout>
+    );
+  }
 
   return (
-    <AppLayout title="商机工作台" subtitle="AI 为您主动发现并评估的招标商机">
+    <AppLayout
+      title={isTenantAdmin ? '企业工作台' : '商机工作台'}
+      subtitle={isTenantAdmin ? '企业画像、成员与今日推荐的整体状态' : '待查看、跟进中与高匹配招标商机'}
+    >
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={8}>
           <StatTile
@@ -472,9 +640,9 @@ export default function DashboardPage() {
         </Col>
         <Col xs={24} sm={8}>
           <StatTile
-            label={byStatus ? '公告总量' : '可见公告'}
-            value={stats ? (byStatus ? totalAnnouncements : stats.visible_announcements ?? '—') : '—'}
-            helper={byStatus ? '全流水线累计采集公告数' : '按你的关注地区与数据源统计'}
+            label="可见公告"
+            value={stats?.visible_announcements ?? '—'}
+            helper="按你的关注地区与数据源统计"
             icon={<DatabaseOutlined />}
             iconBg="rgba(47, 84, 235, 0.08)"
             iconColor="#2F54EB"
@@ -482,64 +650,31 @@ export default function DashboardPage() {
         </Col>
       </Row>
 
-      {byStatus ? (
-        <Card className="compass-card" title="处理流水线" size="small" style={{ marginBottom: 16 }}>
-          <PipelineBar byStatus={byStatus} />
-        </Card>
-      ) : null}
-
-      {health ? (
-        <Card className="compass-card" title="系统健康" size="small" style={{ marginBottom: 24 }}>
-          <Space size={[24, 10]} wrap align="center">
-            <Space size={6}>
-              <Typography.Text type="secondary" style={{ fontSize: 13 }}>AI 服务</Typography.Text>
-              {health.llm.ok ? (
-                <Tag icon={<CheckCircleOutlined />} color="green">正常</Tag>
-              ) : (
-                <Tooltip title={health.llm.last_error ?? ''}>
-                  <Tag icon={<CloseCircleOutlined />} color="red">
-                    连续失败 {health.llm.consecutive_failures} 次
-                  </Tag>
-                </Tooltip>
-              )}
-              {health.llm.fallback_last ? (
-                <Tooltip title={health.llm.fallback_last}>
-                  <Tag icon={<WarningOutlined />} color="orange">启用过备用模型</Tag>
-                </Tooltip>
-              ) : null}
-            </Space>
-            <Space size={6}>
-              <Typography.Text type="secondary" style={{ fontSize: 13 }}>采集调度</Typography.Text>
-              {health.scheduler.ok ? (
-                <Tag icon={<CheckCircleOutlined />} color="green">正常</Tag>
-              ) : (
-                <Tag icon={<WarningOutlined />} color="orange">疑似停摆</Tag>
-              )}
-            </Space>
-            <Typography.Text style={{ fontSize: 13 }}>
-              24h：采集 {health.last_24h.crawled} · 发布 {health.last_24h.published} · 失败{' '}
-              {health.last_24h.failed}
-            </Typography.Text>
-            {Object.keys(health.backlog).length ? (
-              <Space size={6} wrap>
-                <Typography.Text type="secondary" style={{ fontSize: 13 }}>积压</Typography.Text>
-                {Object.entries(health.backlog).map(([s, n]) => (
-                  <Tag key={s} color="gold">{pipelineStatusLabel(s)} {n}</Tag>
-                ))}
-              </Space>
-            ) : null}
-            {health.failed_total ? (
-              <Tag color="red">累计失败 {health.failed_total}</Tag>
-            ) : null}
-            {health.stale_sources.length ? (
-              <Tooltip title={health.stale_sources.map((s) => s.name).join('、')}>
-                <Tag icon={<WarningOutlined />} color="orange">
-                  {health.stale_sources.length} 个源 48h 无新公告
-                </Tag>
-              </Tooltip>
-            ) : null}
-          </Space>
-        </Card>
+      {isTenantAdmin ? (
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          <Col xs={24} md={8}>
+            <Card className="compass-card" size="small" title="画像完整度">
+              <Progress percent={stats?.tenant?.profile_completeness ?? 0} />
+              <Link href="/profile">完善企业画像</Link>
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
+            <Card className="compass-card" size="small" title="成员与协作">
+              <Typography.Title level={3} style={{ marginTop: 0 }}>
+                {stats?.tenant?.members_total ?? '—'}
+              </Typography.Title>
+              <Link href="/members">管理成员账号</Link>
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
+            <Card className="compass-card" size="small" title="订阅范围">
+              <Typography.Title level={3} style={{ marginTop: 0 }}>
+                {stats?.tenant?.source_scope_all ? '全部源' : `${stats?.tenant?.subscribed_sources ?? 0} 个源`}
+              </Typography.Title>
+              <Link href="/settings">调整订阅设置</Link>
+            </Card>
+          </Col>
+        </Row>
       ) : null}
 
       <div

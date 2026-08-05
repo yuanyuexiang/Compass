@@ -49,11 +49,22 @@ const PLATFORM_MENU_ITEMS = [
 const ADMIN_ROLES = ['tenant_admin', 'platform_admin'];
 
 function menuItemsFor(role: string | undefined) {
-  return [
-    ...MENU_ITEMS,
-    ...(ADMIN_ROLES.includes(role ?? '') ? ADMIN_MENU_ITEMS : []),
-    ...(role === 'platform_admin' ? PLATFORM_MENU_ITEMS : []),
-  ];
+  // 平台管理员专注运营：无画像/订阅/商机（平台租户不做业务），成员页管平台租户账号
+  if (role === 'platform_admin') {
+    return [
+      { key: '/', icon: <DashboardOutlined />, label: '工作台' },
+      { key: '/tenants', icon: <ApartmentOutlined />, label: '租户' },
+      { key: '/members', icon: <TeamOutlined />, label: '成员' },
+      { key: '/sources', icon: <CloudDownloadOutlined />, label: '采集' },
+      { key: '/models', icon: <ApiOutlined />, label: '模型' },
+      { key: '/logs', icon: <FileTextOutlined />, label: '日志' },
+      { key: '/notifications', icon: <MailOutlined />, label: '通知' },
+    ];
+  }
+  if (role === 'tenant_admin') {
+    return [...MENU_ITEMS, ...ADMIN_MENU_ITEMS];
+  }
+  return MENU_ITEMS; // 业务员：工作台/商机/画像/订阅/通知
 }
 
 function selectedMenuKey(pathname: string): string {

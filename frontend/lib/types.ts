@@ -54,9 +54,20 @@ export interface Stats {
   by_status?: Record<string, number>;
   /** 租户可见公告数（画像地区 + 关注数据源口径，与商机查询一致） */
   visible_announcements?: number;
+  platform?: {
+    pending_tenants: number;
+    pending_sources: number;
+    active_sources: number;
+    tenants_total: number;
+    users_total: number;
+  };
   tenant?: {
     today_recommended: number;
     unread: number;
+    members_total?: number;
+    profile_completeness?: number;
+    subscribed_sources?: number;
+    source_scope_all?: boolean;
   };
 }
 
