@@ -132,7 +132,7 @@ def friendly_llm_error(exc: Exception) -> str | None:
     if "rate" in text.lower() and "limit" in text.lower():
         return "AI 服务繁忙（限流），请稍后重试"
     if "api key" in text.lower() or type(exc).__name__ == "AuthenticationError":
-        return "AI 服务密钥无效，请联系平台管理员检查配置"
+        return "AI 服务鉴权失败，请检查 API Key 是否有效，以及是否与当前 Base URL 配套"
     if any(
         marker in text.lower()
         for marker in ("model_not_found", "model not found", "invalid model", "does not exist")

@@ -503,7 +503,11 @@ export default function ModelsPage() {
           <Form.Item
             name="base_url"
             label="Base URL（选填，OpenAI 兼容端点）"
-            extra="DeepSeek 官方可留空；通义/智谱等填其兼容端点地址"
+            extra={
+              watchedPreset === 'mimo'
+                ? 'MiMo：sk- 开头的按量 Key 使用默认地址；tp- 开头的 Token Plan Key 必须填写套餐页面提供的专属 Base URL'
+                : 'DeepSeek 官方可留空；通义/智谱等填其兼容端点地址'
+            }
           >
             <Input placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
           </Form.Item>

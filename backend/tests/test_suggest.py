@@ -54,7 +54,8 @@ def test_friendly_llm_error():
     auth = litellm.AuthenticationError(
         message="invalid api key", model="deepseek-v4-flash", llm_provider="deepseek"
     )
-    assert "密钥无效" in friendly_llm_error(auth)
+    assert "鉴权失败" in friendly_llm_error(auth)
+    assert "Base URL" in friendly_llm_error(auth)
     other = litellm.BadRequestError(
         message="something odd", model="deepseek-v4-flash", llm_provider="deepseek"
     )
