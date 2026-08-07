@@ -1,5 +1,6 @@
 """平台管理员接口：租户审批/启停、LLM 用量报表。仅 platform_admin 可用。"""
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
@@ -29,6 +30,7 @@ from app.models import (
 )
 
 router = APIRouter(prefix="/api/admin")
+logger = logging.getLogger(__name__)
 
 TENANT_STATUS_LABELS = {"pending": "待审批", "active": "已开通", "disabled": "已停用"}
 
@@ -430,16 +432,16 @@ def test_llm_provider(body: LlmSceneModelIn, current: CurrentUser = PlatformAdmi
     from app.core.crypto import decrypt
     from app.core.kv import KEY_LLM_PROVIDERS, get_setting
 
-    with session_scope() as session:
-        providers = {
-            p.get("name"): p for p in get_setting(session, KEY_LLM_PROVIDERS, []) or []
-        }
-    p = providers.get(body.provider)
-    key = decrypt(p.get("api_key") or "") if p else ""
-    if not key:
-        raise HTTPException(status_code=422, detail="该供应商尚未保存有效的 API Key")
-    target = {"model": body.model, "api_key": key, "base_url": p.get("base_url") or None}
     try:
+        with session_scope() as session:
+            providers = {
+                p.get("name"): p for p in get_setting(session, KEY_LLM_PROVIDERS, []) or []
+            }
+        p = providers.get(body.provider)
+        key = decrypt(p.get("api_key") or "") if p else ""
+        if not key:
+            return {"ok": False, "message": "该供应商尚未保存有效的 API Key，请重新编辑并保存"}
+        target = {"model": body.model, "api_key": key, "base_url": p.get("base_url") or None}
         extract_completion(
             # 注意：json_object 模式要求提示词里出现 "json" 字样（DeepSeek/OpenAI 通用约束）
             [{"role": "user", "content": '输出 json：{"ok": true}'}],
@@ -449,8 +451,14 @@ def test_llm_provider(body: LlmSceneModelIn, current: CurrentUser = PlatformAdmi
             timeout=25,
         )
         return {"ok": True, "message": "连接正常，密钥有效"}
-    except Exception as exc:  # noqa: BLE001  测试端点把异常转为结果返回
-        return {"ok": False, "message": friendly_llm_error(exc) or str(exc)[:200]}
+    except Exception as exc:  # noqa: BLE001  测试端点绝不能因供应商/配置异常返回 500
+        logger.exception(
+            "LLM 连接测试失败（provider=%s, model=%s）", body.provider, body.model
+        )
+        message = friendly_llm_error(exc)
+        if message is None:
+            message = "连接测试失败，请检查 Base URL、模型名和服务端日志"
+        return {"ok": False, "message": message}
 
 
 @router.get("/audit-logs")
