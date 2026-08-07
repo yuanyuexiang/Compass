@@ -1,6 +1,6 @@
 """LLM 调用配置：直接使用 LiteLLM，不自研封装层（tech-design.md §3，已确认）。
 
-- 模型/密钥读取平台管理员在「模型服务」页的配置（system_settings，60 秒进程缓存，
+- 模型/密钥读取平台管理员在「模型服务」页的配置（system_settings，每次调用实时读取，
   改动即时生效无需重启）；未配置默认模型时明确报错，不再回退环境变量密钥。
 - 支持按场景（extract/match/nl_search/...）指定不同模型；主模型失败自动切备用（fallback）。
 - 每次调用记账到 llm_usage 表（配额判断与商业化计费的底账），失败只告警不影响业务。
@@ -9,8 +9,6 @@
 import logging
 
 import litellm
-
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +64,7 @@ def invalidate_llm_config_cache() -> None:
 
 
 def resolve_llm_target(cfg: dict, scene: str) -> dict:
-    """场景 → {model, api_key, base_url}。优先场景映射，其次 default 映射，最后 .env。"""
+    """场景 → {model, api_key, base_url}。优先场景映射，其次 default 映射，均未配置则报错。"""
     entry = (cfg.get("scene_models") or {}).get(scene) or (cfg.get("scene_models") or {}).get(
         "default"
     )
@@ -106,7 +104,7 @@ def _record_usage(scene: str, tenant_id: int | None, response) -> None:
                 LlmUsage(
                     tenant_id=tenant_id,
                     scene=scene,
-                    model=getattr(response, "model", "") or settings.llm_extract_model,
+                    model=getattr(response, "model", "") or "",
                     prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
                     completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
                     total_tokens=getattr(usage, "total_tokens", 0) or 0,
@@ -128,7 +126,7 @@ def friendly_llm_error(exc: Exception) -> str | None:
         return None
     text = str(exc)
     if "Insufficient Balance" in text or "insufficient_quota" in text:
-        return "AI 服务余额不足，请联系平台管理员为 DeepSeek 账户充值"
+        return "AI 服务余额不足，请联系平台管理员为当前模型供应商的账户充值"
     if "rate" in text.lower() and "limit" in text.lower():
         return "AI 服务繁忙（限流），请稍后重试"
     if "api key" in text.lower() or type(exc).__name__ == "AuthenticationError":

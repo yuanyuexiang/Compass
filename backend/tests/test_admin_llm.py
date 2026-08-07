@@ -1,6 +1,9 @@
-"""模型供应商连接测试接口的错误边界。"""
+"""模型服务配置保存与连接测试接口的边界。"""
 
 from contextlib import contextmanager
+
+import pytest
+from fastapi import HTTPException
 
 from app.ai import llm_config
 from app.api.routes import admin
@@ -84,3 +87,60 @@ def test_admin_test_does_not_clear_extract_failure_streak(monkeypatch):
     )
 
     assert resets == []
+
+
+def _put_config(monkeypatch, body: "admin.LlmConfigIn", stored_providers=None) -> dict:
+    """执行 put_llm_config 并捕获 set_setting 写入的键值。"""
+    saved: dict = {}
+    monkeypatch.setattr(admin, "session_scope", _fake_session_scope)
+    monkeypatch.setattr(admin, "record_audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(kv, "get_setting", lambda *_args, **_kwargs: stored_providers or [])
+    monkeypatch.setattr(kv, "set_setting", lambda _s, key, value: saved.__setitem__(key, value))
+    monkeypatch.setattr(crypto, "encrypt", lambda value: f"enc:{value}")
+    admin.put_llm_config(body, current=object())
+    return saved
+
+
+def test_put_llm_config_drops_fallback_without_model(monkeypatch):
+    """备用模型只选了供应商没填模型名时不应落库为半截配置。"""
+    saved = _put_config(
+        monkeypatch,
+        admin.LlmConfigIn(
+            providers=[admin.LlmProviderIn(name="mimo", api_key="sk-a")],
+            fallback=admin.LlmSceneModelIn(provider="mimo", model="   "),
+        ),
+    )
+    assert saved[kv.KEY_LLM_FALLBACK] is None
+
+
+def test_put_llm_config_new_provider_requires_key(monkeypatch):
+    """新供应商不带 API Key 必须 422，而不是静默存下无密钥配置。"""
+    with pytest.raises(HTTPException) as exc:
+        _put_config(monkeypatch, admin.LlmConfigIn(providers=[admin.LlmProviderIn(name="mimo")]))
+    assert exc.value.status_code == 422
+
+
+def test_put_llm_config_blank_key_keeps_stored_cipher(monkeypatch):
+    """编辑供应商留空密钥 = 保留已存密文（接口永不回传明文，前端只提交改动）。"""
+    saved = _put_config(
+        monkeypatch,
+        admin.LlmConfigIn(
+            providers=[admin.LlmProviderIn(name="mimo", base_url="https://x.test/v1")]
+        ),
+        stored_providers=[{"name": "mimo", "api_key": "enc:old", "base_url": ""}],
+    )
+    assert saved[kv.KEY_LLM_PROVIDERS] == [
+        {"name": "mimo", "api_key": "enc:old", "base_url": "https://x.test/v1"}
+    ]
+
+
+def test_put_llm_config_drops_scene_referencing_unknown_provider(monkeypatch):
+    """场景映射引用不存在的供应商时过滤掉，不能存下解析不了的悬空引用。"""
+    saved = _put_config(
+        monkeypatch,
+        admin.LlmConfigIn(
+            providers=[admin.LlmProviderIn(name="mimo", api_key="sk-a")],
+            scene_models={"extract": admin.LlmSceneModelIn(provider="ghost", model="m1")},
+        ),
+    )
+    assert saved[kv.KEY_LLM_SCENE_MODELS] == {}

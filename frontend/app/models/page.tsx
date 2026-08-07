@@ -133,19 +133,40 @@ export default function ModelsPage() {
   const [testModel, setTestModel] = useState('');
   const [testing, setTesting] = useState(false);
 
-  // 自动保存控制：load() 引发的 state 变化不应触发自动保存
-  const skipAutosave = useRef(true);
-  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 最新 state 镜像：失焦保存等异步路径读它，避免闭包旧值造成全量覆盖竞态
+  const latest = useRef({ providers, sceneModels, fallback });
+  latest.current = { providers, sceneModels, fallback };
+  // 上次成功保存（或加载）的 payload 快照：内容没变就不重复 PUT，防审计日志刷屏
+  const lastSaved = useRef('');
+
+  /** 组装 PUT payload（接口是全量覆盖语义；未改动的密钥提交空串 = 保留已存密文） */
+  const buildPayload = (
+    nextProviders: ProviderRow[],
+    nextScene: Record<string, SceneModel>,
+    nextFallback: SceneModel | null
+  ) => ({
+    providers: nextProviders.map((p) => ({
+      name: p.name,
+      api_key: p.newKey ?? '',
+      base_url: p.base_url,
+    })),
+    scene_models: Object.fromEntries(
+      Object.entries(nextScene).filter(
+        ([, value]) => value.provider.trim() && value.model.trim()
+      )
+    ),
+    fallback: nextFallback?.provider.trim() && nextFallback.model.trim() ? nextFallback : null,
+  });
 
   const load = () => {
     apiFetch<LlmConfig>('/api/admin/llm')
       .then((d) => {
-        skipAutosave.current = true;
         setProviders(d.providers);
         setSceneModels(d.scene_models);
         setFallback(d.fallback);
         setScenes(d.scenes);
         setUsage(d.usage_7d);
+        lastSaved.current = JSON.stringify(buildPayload(d.providers, d.scene_models, d.fallback));
         setError(null);
       })
       .catch((e: Error) => setError(e.message))
@@ -154,33 +175,17 @@ export default function ModelsPage() {
 
   useEffect(load, []);
 
-  /** 立即持久化（供应商增删改用；传入下一刻的完整配置，避免闭包旧值） */
+  /** 立即持久化（传入下一刻的完整配置，避免闭包旧值）；内容与上次一致则跳过 */
   const persist = async (
     nextProviders: ProviderRow[],
     nextScene: Record<string, SceneModel>,
     nextFallback: SceneModel | null
   ): Promise<boolean> => {
-    const validScene = Object.fromEntries(
-      Object.entries(nextScene).filter(
-        ([, value]) => value.provider.trim() && value.model.trim()
-      )
-    );
-    const validFallback = nextFallback?.provider.trim() && nextFallback.model.trim()
-      ? nextFallback
-      : null;
+    const serialized = JSON.stringify(buildPayload(nextProviders, nextScene, nextFallback));
+    if (serialized === lastSaved.current) return true;
     try {
-      await apiFetch('/api/admin/llm', {
-        method: 'PUT',
-        body: JSON.stringify({
-          providers: nextProviders.map((p) => ({
-            name: p.name,
-            api_key: p.newKey ?? '',
-            base_url: p.base_url,
-          })),
-          scene_models: validScene,
-          fallback: validFallback,
-        }),
-      });
+      await apiFetch('/api/admin/llm', { method: 'PUT', body: serialized });
+      lastSaved.current = serialized;
       message.success({ content: '已保存', key: 'llm-save', duration: 1.2 });
       return true;
     } catch (e) {
@@ -189,25 +194,19 @@ export default function ModelsPage() {
     }
   };
 
-  // 场景映射/备用模型改动 → 600ms 防抖自动保存（供应商列表由弹窗流程即时保存）
-  useEffect(() => {
-    if (skipAutosave.current) {
-      skipAutosave.current = false;
-      return;
-    }
-    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    const incomplete = [...Object.values(sceneModels), ...(fallback ? [fallback] : [])].some(
+  /** 有半填的场景行（选了供应商没填模型）时不落库，等补全再存——半截模型名一旦
+   *  保存即刻生效，会让流水线调用不存在的模型并污染 LLM 连败计数 */
+  const hasIncomplete = (s: Record<string, SceneModel>, f: SceneModel | null) =>
+    [...Object.values(s), ...(f ? [f] : [])].some(
       (value) => !value.provider.trim() || !value.model.trim()
     );
-    if (incomplete) return;
-    autosaveTimer.current = setTimeout(() => {
-      persist(providers, sceneModels, fallback);
-    }, 600);
-    return () => {
-      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneModels, fallback]);
+
+  /** 场景映射输入框失焦时保存当前配置（用最新镜像，内容没变会被 persist 去重） */
+  const saveCurrent = () => {
+    const { providers: p, sceneModels: s, fallback: f } = latest.current;
+    if (hasIncomplete(s, f)) return;
+    void persist(p, s, f);
+  };
 
   const openEdit = (p: ProviderRow | null) => {
     setEditing(p);
@@ -215,9 +214,8 @@ export default function ModelsPage() {
       preset: p ? (presetOf(p.name) ? p.name : CUSTOM) : PROVIDER_PRESETS[0].value,
       name: p?.name ?? '',
       api_key: '',
-      base_url: p
-        ? p.base_url || presetOf(p.name)?.base_url || ''
-        : PROVIDER_PRESETS[0].base_url,
+      // 编辑时保持已存值：留空的 base_url 有「走默认端点」语义，不能预填成预设 URL
+      base_url: p ? p.base_url : PROVIDER_PRESETS[0].base_url,
     });
     setEditOpen(true);
   };
@@ -231,7 +229,11 @@ export default function ModelsPage() {
   const submitEdit = async () => {
     const v = await editForm.validateFields();
     const name = v.preset === CUSTOM ? v.name.trim() : v.preset;
-    const rest = providers.filter((p) => p.name !== (editing?.name ?? name) && p.name !== name);
+    if (!editing && providers.some((p) => p.name === name)) {
+      message.error(`供应商「${presetOf(name)?.label ?? name}」已存在，请直接编辑该行`);
+      return;
+    }
+    const rest = providers.filter((p) => p.name !== name);
     const next = [
       ...rest,
       {
@@ -245,6 +247,9 @@ export default function ModelsPage() {
     const ok = await persist(next, sceneModels, fallback);
     setSaving(false);
     if (ok) {
+      // 先乐观更新本地列表（去掉已提交的明文 key），再 load() 刷新脱敏展示；
+      // 否则刷新返回前的场景保存会用旧列表全量覆盖，把刚保存的编辑冲掉
+      setProviders(next.map(({ newKey: _newKey, ...rest2 }) => rest2));
       setEditOpen(false);
       load();
     }
@@ -257,7 +262,12 @@ export default function ModelsPage() {
       Object.entries(sceneModels).filter(([, v]) => v.provider !== name)
     );
     const nextFallback = fallback?.provider === name ? null : fallback;
-    if (await persist(next, nextScene, nextFallback)) load();
+    if (await persist(next, nextScene, nextFallback)) {
+      setProviders(next);
+      setSceneModels(nextScene);
+      setFallback(nextFallback);
+      load();
+    }
   };
 
   const runTest = async () => {
@@ -343,15 +353,21 @@ export default function ModelsPage() {
 
   const sceneRow = (key: string, label: string) => {
     const cur = key === '__fallback__' ? fallback : sceneModels[key];
-    const setCur = (v: SceneModel | null) => {
+    /** 更新本行并按需保存。保存用计算出的 next 值（setState 异步，不能读回 state）。 */
+    const applyChange = (v: SceneModel | null, save: boolean) => {
+      const nextScene = (() => {
+        if (key === '__fallback__') return sceneModels;
+        const next = { ...sceneModels };
+        if (v) next[key] = v;
+        else delete next[key];
+        return next;
+      })();
+      const nextFallback = key === '__fallback__' ? v : fallback;
       if (key === '__fallback__') setFallback(v);
-      else
-        setSceneModels((m) => {
-          const next = { ...m };
-          if (v) next[key] = v;
-          else delete next[key];
-          return next;
-        });
+      else setSceneModels(nextScene);
+      if (save && !hasIncomplete(nextScene, nextFallback)) {
+        void persist(latest.current.providers, nextScene, nextFallback);
+      }
     };
     return (
       <Space key={key} size={10} wrap>
@@ -366,12 +382,13 @@ export default function ModelsPage() {
           options={providerOptions}
           onChange={(prov) => {
             if (!prov) {
-              setCur(null);
+              applyChange(null, true);
               return;
             }
             const suggested = presetOf(prov)?.models[0] ?? '';
-            const currentModel = cur?.provider === prov ? cur.model : '';
-            setCur({ provider: prov, model: currentModel || suggested });
+            const model = (cur?.provider === prov ? cur.model : '') || suggested;
+            // 带出了完整模型名（预设推荐）才保存；自定义供应商等模型填完再存
+            applyChange({ provider: prov, model }, !!model.trim());
           }}
         />
         <AutoComplete
@@ -380,11 +397,14 @@ export default function ModelsPage() {
           value={cur?.model ?? ''}
           disabled={!cur?.provider}
           options={(presetOf(cur?.provider ?? '')?.models ?? []).map((m) => ({ value: m }))}
-          onChange={(v) => cur && setCur({ ...cur, model: v })}
+          // 键入只更新本地：半截模型名不落库（保存即生效，会打挂流水线调用）
+          onChange={(v) => cur && applyChange({ ...cur, model: v }, false)}
+          onSelect={(v: string) => cur && applyChange({ ...cur, model: v }, true)}
+          onBlur={saveCurrent}
         />
         {cur?.provider && !cur.model.trim() ? (
           <Typography.Text type="warning" style={{ fontSize: 12 }}>
-            填写模型名后自动保存
+            填写模型名后保存
           </Typography.Text>
         ) : null}
       </Space>
@@ -484,12 +504,13 @@ export default function ModelsPage() {
             <Form.Item
               name="name"
               label="自定义名称（标识用，小写英文）"
+              extra={editing ? '名称是配置的引用标识，不可修改；需改名请删除后重建' : undefined}
               rules={[
                 { required: true, message: '请输入名称' },
                 { pattern: /^[a-z][a-z0-9_-]{1,31}$/, message: '小写字母开头，可含数字/中划线' },
               ]}
             >
-              <Input maxLength={32} placeholder="如 my-gateway" />
+              <Input maxLength={32} placeholder="如 my-gateway" disabled={!!editing} />
             </Form.Item>
           ) : null}
           <Form.Item

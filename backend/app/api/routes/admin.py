@@ -410,7 +410,7 @@ def put_llm_config(body: LlmConfigIn, current: CurrentUser = PlatformAdminDep) -
         }
         fallback = (
             {"provider": body.fallback.provider, "model": body.fallback.model.strip()}
-            if body.fallback and body.fallback.provider in names
+            if body.fallback and body.fallback.provider in names and body.fallback.model.strip()
             else None
         )
         set_setting(session, KEY_LLM_PROVIDERS, stored)
