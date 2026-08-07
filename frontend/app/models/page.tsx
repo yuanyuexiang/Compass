@@ -74,6 +74,12 @@ const PROVIDER_PRESETS: {
     models: ['openai/deepseek-ai/DeepSeek-V3', 'openai/Qwen/Qwen2.5-72B-Instruct'],
   },
   {
+    value: 'mimo',
+    label: 'Xiaomi MiMo（小米）',
+    base_url: 'https://api.xiaomimimo.com/v1',
+    models: ['openai/mimo-v2.5-pro', 'openai/mimo-v2.5'],
+  },
+  {
     value: 'openai',
     label: 'OpenAI',
     base_url: '',
@@ -307,8 +313,12 @@ export default function ModelsPage() {
             icon={<ExperimentOutlined />}
             disabled={!p.api_key_masked}
             onClick={() => {
+              const preset = presetOf(p.name);
+              const configured = sceneModels.default?.provider === p.name
+                ? sceneModels.default.model
+                : Object.values(sceneModels).find((item) => item.provider === p.name)?.model;
               setTestProvider(p.name);
-              setTestModel(sceneModels.default?.model ?? '');
+              setTestModel(configured || preset?.models[0] || '');
               setTestOpen(true);
             }}
           >
@@ -510,16 +520,35 @@ export default function ModelsPage() {
         <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
           将用该供应商已保存的密钥发起一次最小调用，实测连通性、密钥有效性与余额状态。
         </Typography.Paragraph>
-        <Space.Compact style={{ width: '100%' }}>
-          <Input style={{ width: 64 }} value="模型" disabled />
-          <AutoComplete
-            style={{ flex: 1 }}
-            value={testModel}
-            onChange={(v) => setTestModel(v)}
-            options={(presetOf(testProvider)?.models ?? []).map((m) => ({ value: m }))}
-            placeholder="deepseek/deepseek-v4-flash"
-          />
-        </Space.Compact>
+        <Typography.Text strong>测试模型</Typography.Text>
+        {presetOf(testProvider) ? (
+          <>
+            <Select
+              style={{ width: '100%', marginTop: 8 }}
+              value={testModel}
+              onChange={setTestModel}
+              options={presetOf(testProvider)!.models.map((model, index) => ({
+                value: model,
+                label: index === 0 ? `${model}（推荐）` : model,
+              }))}
+            />
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 6 }}>
+              已自动选择推荐模型；也可以从该供应商支持的模型中切换。
+            </Typography.Paragraph>
+          </>
+        ) : (
+          <>
+            <Input
+              style={{ marginTop: 8 }}
+              value={testModel}
+              onChange={(event) => setTestModel(event.target.value)}
+              placeholder="请输入 LiteLLM 模型名，如 openai/your-model"
+            />
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 6 }}>
+              自定义供应商没有内置模型列表，请填写 LiteLLM 格式的完整模型名。
+            </Typography.Paragraph>
+          </>
+        )}
       </Modal>
     </AppLayout>
   );
