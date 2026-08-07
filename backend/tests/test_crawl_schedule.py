@@ -181,6 +181,61 @@ def test_announcement_is_stale_prefers_publish_time():
     assert announcement_is_stale(no_pub, deadline) is True
 
 
+def test_ai_extract_task_persists_failure_in_separate_transaction(monkeypatch):
+    """提取异常不能随主事务回滚而丢失公告失败状态和错误现场。"""
+    from contextlib import contextmanager
+
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from app.models import Announcement
+    from app.models.public import AnnouncementStatus
+    from app.tasks import pipeline
+
+    engine = create_engine("sqlite://")
+    Announcement.__table__.create(engine)
+    with Session(engine) as session:
+        session.add(
+            Announcement(
+                id=701,
+                source_id=1,
+                url="http://x/701",
+                fingerprint="f701",
+                title="probe",
+                clean_text="body",
+                status=AnnouncementStatus.ATTACHMENTS_PARSED.value,
+                created_at=NOW,
+            )
+        )
+        session.commit()
+
+    @contextmanager
+    def fake_scope():
+        with Session(engine) as session:
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+    monkeypatch.setattr(pipeline, "session_scope", fake_scope)
+    monkeypatch.setattr(
+        pipeline,
+        "run_ai_extract",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("provider unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        pipeline.ai_extract_task.run(701, False)
+
+    with Session(engine) as session:
+        announcement = session.get(Announcement, 701)
+        assert announcement.status == AnnouncementStatus.FAILED.value
+        assert announcement.error == "provider unavailable"
+
+
 def test_ensure_cst():
     """采集解析出的 naive 北京时间入库前补东八区；已带时区/空值原样返回。"""
     from datetime import datetime, timedelta

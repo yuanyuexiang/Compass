@@ -215,7 +215,9 @@ export default function ModelsPage() {
       preset: p ? (presetOf(p.name) ? p.name : CUSTOM) : PROVIDER_PRESETS[0].value,
       name: p?.name ?? '',
       api_key: '',
-      base_url: p?.base_url ?? (p ? '' : PROVIDER_PRESETS[0].base_url),
+      base_url: p
+        ? p.base_url || presetOf(p.name)?.base_url || ''
+        : PROVIDER_PRESETS[0].base_url,
     });
     setEditOpen(true);
   };

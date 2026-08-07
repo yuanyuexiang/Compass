@@ -7,7 +7,6 @@
 """
 
 import logging
-import time
 
 import litellm
 
@@ -19,15 +18,23 @@ logger = logging.getLogger(__name__)
 class LlmConfigurationError(RuntimeError):
     """平台尚未配置可用的模型供应商或默认模型。"""
 
-_cfg_cache: dict = {"at": 0.0, "data": None}
-_CFG_TTL = 60.0
+# 已知 OpenAI 兼容供应商的官方端点。历史配置可能只保存了供应商名和 Key，Base URL
+# 为空时不能让 LiteLLM 误回退到 api.openai.com。
+KNOWN_PROVIDER_BASE_URLS = {
+    "mimo": "https://api.xiaomimimo.com/v1",
+}
+
+
+def provider_base_url(name: str, configured: str | None) -> str | None:
+    return (configured or "").strip() or KNOWN_PROVIDER_BASE_URLS.get(name)
 
 
 def _load_llm_config() -> dict:
-    """读平台配置（providers/scene_models/fallback），密钥已解密。DB 不可用返回空配置。"""
-    now = time.monotonic()
-    if _cfg_cache["data"] is not None and now - _cfg_cache["at"] < _CFG_TTL:
-        return _cfg_cache["data"]
+    """读平台配置（providers/scene_models/fallback），密钥已解密。DB 不可用返回空配置。
+
+    每次调用直接读取，确保 API 保存后所有 Celery worker 立即看到新配置；LLM 网络耗时
+    远大于这次轻量主键查询，不值得用无法跨进程失效的本地缓存换取错误配置风险。
+    """
     cfg: dict = {"providers": {}, "scene_models": {}, "fallback": None}
     try:
         from app.core.crypto import decrypt
@@ -44,18 +51,18 @@ def _load_llm_config() -> dict:
                 key = decrypt(p.get("api_key") or "")
                 if p.get("name") and key:
                     cfg["providers"][p["name"]] = {
-                        "api_key": key, "base_url": p.get("base_url") or None,
+                        "api_key": key,
+                        "base_url": provider_base_url(p["name"], p.get("base_url")),
                     }
             cfg["scene_models"] = get_setting(session, KEY_LLM_SCENE_MODELS, {}) or {}
             cfg["fallback"] = get_setting(session, KEY_LLM_FALLBACK, None)
     except Exception:  # noqa: BLE001  调用阶段会用清晰错误提示，不在加载阶段拖垮进程
         logger.warning("LLM 平台配置读取失败", exc_info=True)
-    _cfg_cache.update(at=now, data=cfg)
     return cfg
 
 
 def invalidate_llm_config_cache() -> None:
-    _cfg_cache.update(at=0.0, data=None)
+    """兼容现有保存调用；配置已改为每次实时读取，无本地缓存需要清理。"""
 
 
 def resolve_llm_target(cfg: dict, scene: str) -> dict:
@@ -174,18 +181,22 @@ def extract_completion(
     """
     from datetime import UTC, datetime
 
-    from app.core.ratelimit import counter_incr, counter_reset, note_set
+    from app.core.ratelimit import counter_incr, counter_reset, note_delete, note_set
 
     cfg = _load_llm_config()
     target = model_override or resolve_llm_target(cfg, scene)
+    # 流水线背压只关心字段提取是否可用。管理端测试、画像或自然语言搜索不应污染或
+    # 清除自动提取的连败状态，否则“测试了另一个供应商”也会造成虚假恢复。
+    track_pipeline_health = scene == "extract"
     try:
         resp = _call(target, messages, **kwargs)
     except Exception as exc:
-        counter_incr("llm_failures")
-        note_set(
-            "llm_last_error",
-            f"{datetime.now(UTC).strftime('%m-%d %H:%M')} [{scene}] {str(exc)[:180]}",
-        )
+        if track_pipeline_health:
+            counter_incr("llm_failures")
+            note_set(
+                "llm_last_error",
+                f"{datetime.now(UTC).strftime('%m-%d %H:%M')} [{scene}] {str(exc)[:180]}",
+            )
         fallback = None if model_override else resolve_llm_fallback(cfg)
         # 备用与主完全相同（模型+密钥都一样）才放弃——同模型不同供应商 key 是合法备份
         if not fallback or (
@@ -214,6 +225,8 @@ def extract_completion(
                 )
         except Exception:  # noqa: BLE001
             logger.debug("llm.fallback 事件记录失败", exc_info=True)
-    counter_reset("llm_failures")
+    if track_pipeline_health:
+        counter_reset("llm_failures")
+        note_delete("llm_last_error")
     _record_usage(scene, tenant_id, resp)
     return resp

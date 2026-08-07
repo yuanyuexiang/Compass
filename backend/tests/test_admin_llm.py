@@ -60,3 +60,27 @@ def test_custom_base_url_automatically_uses_openai_adapter(monkeypatch):
 
     assert captured["model"] == "openai/moonshotai/kimi-k3-free"
     assert captured["api_base"] == "https://api.example.test/v1"
+
+
+def test_mimo_empty_base_url_uses_official_endpoint():
+    assert (
+        llm_config.provider_base_url("mimo", "")
+        == "https://api.xiaomimimo.com/v1"
+    )
+
+
+def test_admin_test_does_not_clear_extract_failure_streak(monkeypatch):
+    """测试其他供应商成功不等于正式字段提取恢复。"""
+    resets = []
+    monkeypatch.setattr(llm_config, "_load_llm_config", lambda: {})
+    monkeypatch.setattr(llm_config, "_call", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr("app.core.ratelimit.counter_reset", lambda key: resets.append(key))
+    monkeypatch.setattr("app.core.ratelimit.note_delete", lambda _key: None)
+
+    llm_config.extract_completion(
+        messages=[],
+        scene="admin_test",
+        model_override={"model": "openai/test", "api_key": "sk-test", "base_url": None},
+    )
+
+    assert resets == []

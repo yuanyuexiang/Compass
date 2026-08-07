@@ -428,7 +428,7 @@ def put_llm_config(body: LlmConfigIn, current: CurrentUser = PlatformAdminDep) -
 @router.post("/llm/test")
 def test_llm_provider(body: LlmSceneModelIn, current: CurrentUser = PlatformAdminDep) -> dict:
     """用已存密钥对指定 供应商+模型 发一次最小调用，实测连通性/余额/密钥有效性。"""
-    from app.ai.llm_config import extract_completion, friendly_llm_error
+    from app.ai.llm_config import extract_completion, friendly_llm_error, provider_base_url
     from app.core.crypto import decrypt
     from app.core.kv import KEY_LLM_PROVIDERS, get_setting
 
@@ -441,7 +441,11 @@ def test_llm_provider(body: LlmSceneModelIn, current: CurrentUser = PlatformAdmi
         key = decrypt(p.get("api_key") or "") if p else ""
         if not key:
             return {"ok": False, "message": "该供应商尚未保存有效的 API Key，请重新编辑并保存"}
-        target = {"model": body.model, "api_key": key, "base_url": p.get("base_url") or None}
+        target = {
+            "model": body.model,
+            "api_key": key,
+            "base_url": provider_base_url(body.provider, p.get("base_url")),
+        }
         extract_completion(
             # 注意：json_object 模式要求提示词里出现 "json" 字样（DeepSeek/OpenAI 通用约束）
             [{"role": "user", "content": '输出 json：{"ok": true}'}],

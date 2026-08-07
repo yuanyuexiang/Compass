@@ -294,16 +294,25 @@ def ai_extract_task(announcement_id: int, automatic: bool = False) -> None:
     if automatic and not automatic_llm_allowed():
         logger.info("自动 AI 提取已越过运行时间窗，留待白天处理 ann=%s", announcement_id)
         return
-    with session_scope() as session:
-        # 时效统一闸门：无论从哪条链路派发来，自动提取都不处理过期公告
-        if automatic:
+    try:
+        with session_scope() as session:
+            # 时效统一闸门：无论从哪条链路派发来，自动提取都不处理过期公告
+            if automatic:
+                ann = session.get(Announcement, announcement_id)
+                if ann is not None and announcement_is_stale(ann, extract_deadline()):
+                    ann.status = AnnouncementStatus.SKIPPED.value
+                    ann.error = SKIP_STALE_NOTE
+                    logger.info("超时效放弃自动 AI 提取 ann=%s", announcement_id)
+                    return
+            run_ai_extract(session, announcement_id)
+    except Exception as exc:
+        # run_ai_extract 内的状态修改会随异常事务回滚，必须用独立事务持久化失败现场。
+        with session_scope() as session:
             ann = session.get(Announcement, announcement_id)
-            if ann is not None and announcement_is_stale(ann, extract_deadline()):
-                ann.status = AnnouncementStatus.SKIPPED.value
-                ann.error = SKIP_STALE_NOTE
-                logger.info("超时效放弃自动 AI 提取 ann=%s", announcement_id)
-                return
-        run_ai_extract(session, announcement_id)
+            if ann is not None:
+                ann.status = AnnouncementStatus.FAILED.value
+                ann.error = str(exc)[:2000]
+        raise
     publish_task.delay(announcement_id, automatic)
 
 
@@ -535,18 +544,27 @@ def ai_backlog_tick_task() -> None:
     if not automatic_llm_allowed(now) or not acquire_cooldown("ai_backlog_tick", 240):
         return
     # LLM 连败时降为单条探针：不再成批送死，探针成功即清零计数、下个 tick 恢复满速
-    batch = 1 if llm_streak_broken() else AUTO_LLM_BACKLOG_BATCH
+    probing = llm_streak_broken()
+    batch = 1 if probing else AUTO_LLM_BACKLOG_BATCH
     with session_scope() as session:
+        statuses = (
+            (
+                AnnouncementStatus.CLEANED.value,
+                AnnouncementStatus.ATTACHMENTS_PARSED.value,
+                AnnouncementStatus.FAILED.value,
+            )
+            if probing
+            else (
+                AnnouncementStatus.CLEANED.value,
+                AnnouncementStatus.ATTACHMENTS_PARSED.value,
+            )
+        )
         announcement_ids = list(
             session.scalars(
                 select(Announcement.id)
                 .where(
-                    Announcement.status.in_(
-                        (
-                            AnnouncementStatus.CLEANED.value,
-                            AnnouncementStatus.ATTACHMENTS_PARSED.value,
-                        )
-                    ),
+                    Announcement.status.in_(statuses),
+                    Announcement.clean_text.isnot(None),
                     ~announcement_stale_clause(extract_deadline(now)),
                 )
                 .order_by(Announcement.updated_at)

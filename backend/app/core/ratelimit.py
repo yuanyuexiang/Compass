@@ -104,6 +104,13 @@ def note_get(key: str) -> str | None:
         return None
 
 
+def note_delete(key: str) -> None:
+    try:
+        _redis().delete(f"note:{key}")
+    except redis.RedisError:
+        pass
+
+
 def quota_key(scene: str, tenant_id: int, now: datetime | None = None) -> str:
     day = (now or datetime.now(_TZ_BEIJING)).astimezone(_TZ_BEIJING).strftime("%Y%m%d")
     return f"quota:{scene}:{tenant_id}:{day}"
