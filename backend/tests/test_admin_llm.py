@@ -38,3 +38,25 @@ def test_llm_connection_test_converts_unexpected_error_to_result(monkeypatch):
         "ok": False,
         "message": "连接测试失败，请检查 Base URL、模型名和服务端日志",
     }
+
+
+def test_custom_base_url_automatically_uses_openai_adapter(monkeypatch):
+    """自定义 OpenAI 兼容网关接受供应商原始模型 ID，无需用户理解 LiteLLM 前缀。"""
+    captured = {}
+    monkeypatch.setattr(
+        llm_config.litellm,
+        "completion",
+        lambda **kwargs: captured.update(kwargs) or object(),
+    )
+
+    llm_config._call(
+        {
+            "model": "moonshotai/kimi-k3-free",
+            "api_key": "sk-test",
+            "base_url": "https://api.example.test/v1",
+        },
+        [{"role": "user", "content": "hello"}],
+    )
+
+    assert captured["model"] == "openai/moonshotai/kimi-k3-free"
+    assert captured["api_base"] == "https://api.example.test/v1"

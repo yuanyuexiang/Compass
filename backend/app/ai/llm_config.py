@@ -126,15 +126,31 @@ def friendly_llm_error(exc: Exception) -> str | None:
         return "AI 服务繁忙（限流），请稍后重试"
     if "api key" in text.lower() or type(exc).__name__ == "AuthenticationError":
         return "AI 服务密钥无效，请联系平台管理员检查配置"
+    if any(
+        marker in text.lower()
+        for marker in ("model_not_found", "model not found", "invalid model", "does not exist")
+    ):
+        return "该模型不存在或当前账户无权使用，请检查供应商的模型列表"
     if "timeout" in text.lower():
         return "AI 服务响应超时，请稍后重试"
     return "AI 服务暂时不可用，请稍后重试"
 
 
+def normalize_model_for_target(target: dict) -> str:
+    """自定义 Base URL 均约定为 OpenAI 兼容端点，自动选择 LiteLLM 的 openai 适配器。
+
+    管理员只需填写供应商公布的原始模型 ID；已有 ``openai/`` 配置保持不变。
+    """
+    model = str(target["model"]).strip()
+    if target.get("base_url") and not model.startswith("openai/"):
+        return f"openai/{model}"
+    return model
+
+
 def _call(target: dict, messages: list[dict], **kwargs):
     extra = {"api_base": target["base_url"]} if target.get("base_url") else {}
     return litellm.completion(
-        model=target["model"],
+        model=normalize_model_for_target(target),
         api_key=target["api_key"],
         messages=messages,
         response_format={"type": "json_object"},

@@ -542,10 +542,10 @@ export default function ModelsPage() {
               style={{ marginTop: 8 }}
               value={testModel}
               onChange={(event) => setTestModel(event.target.value)}
-              placeholder="请输入 LiteLLM 模型名，如 openai/your-model"
+              placeholder="请输入供应商给出的模型 ID，如 moonshotai/kimi-k3-free"
             />
             <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 6 }}>
-              自定义供应商没有内置模型列表，请填写 LiteLLM 格式的完整模型名。
+              直接填写供应商公布的模型 ID；系统会自动按 OpenAI 兼容协议调用。
             </Typography.Paragraph>
           </>
         )}
