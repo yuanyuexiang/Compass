@@ -272,6 +272,131 @@ def test_ai_extract_task_persists_failure_in_separate_transaction(monkeypatch):
         assert announcement.error == "provider unavailable"
 
 
+def test_fetch_and_clean_task_persists_failure_and_records_event(monkeypatch):
+    """清洗异常不能无声回滚卡回 crawled（实测 9 条被 sweep 每小时空转重派两天）：
+    独立事务落 failed+error，并采样记一条运行日志让原因自己浮上来。"""
+    from contextlib import contextmanager
+
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from app.models import Announcement
+    from app.models.public import AnnouncementStatus
+    from app.tasks import pipeline
+
+    engine = create_engine("sqlite://")
+    Announcement.__table__.create(engine)
+    with Session(engine) as session:
+        session.add(
+            Announcement(
+                id=801, source_id=1, url="http://x/801", fingerprint="f801",
+                title="probe", status=AnnouncementStatus.CRAWLED.value, created_at=NOW,
+            )
+        )
+        session.commit()
+
+    @contextmanager
+    def fake_scope():
+        with Session(engine) as session:
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+    events = []
+    monkeypatch.setattr(pipeline, "session_scope", fake_scope)
+    monkeypatch.setattr(
+        pipeline,
+        "run_fetch_and_clean",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("detail page 404")),
+    )
+    monkeypatch.setattr(
+        pipeline, "record_event", lambda _s, event, detail, **kw: events.append((event, detail))
+    )
+    monkeypatch.setattr("app.core.ratelimit.acquire_cooldown", lambda *_a, **_k: True)
+
+    with pytest.raises(RuntimeError, match="detail page 404"):
+        pipeline.fetch_and_clean_task.run(801, False)
+
+    with Session(engine) as session:
+        announcement = session.get(Announcement, 801)
+        assert announcement.status == AnnouncementStatus.FAILED.value
+        assert announcement.error == "detail page 404"
+    assert events and events[0][0] == "clean.failure" and "detail page 404" in events[0][1]
+
+
+def test_sweep_gives_up_stale_clean_loop(monkeypatch):
+    """sweep 熔断：清洗通道的卡死公告超时效后标 skipped（保留此前错误现场），
+    时效内的照常重派，不再无限空转。"""
+    from contextlib import contextmanager
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from app.models import Announcement
+    from app.models.public import AnnouncementStatus
+    from app.tasks import pipeline
+
+    engine = create_engine("sqlite://")
+    Announcement.__table__.create(engine)
+    now = datetime.now(UTC)
+    with Session(engine) as session:
+        # 卡死两天的：采集 72h 前（无发布时间按采集时间判过期），带此前清洗错误
+        session.add(
+            Announcement(
+                id=901, source_id=1, url="http://x/901", fingerprint="f901",
+                title="stuck", status=AnnouncementStatus.CRAWLED.value,
+                created_at=now - timedelta(hours=72),
+                updated_at=now - timedelta(hours=72), error="boom",
+            )
+        )
+        # 时效内、停滞超 1 小时的：应正常重派清洗
+        session.add(
+            Announcement(
+                id=902, source_id=1, url="http://x/902", fingerprint="f902",
+                title="recent", status=AnnouncementStatus.CRAWLED.value,
+                created_at=now - timedelta(hours=2),
+                updated_at=now - timedelta(hours=2),
+            )
+        )
+        session.commit()
+
+    @contextmanager
+    def fake_scope():
+        with Session(engine) as session:
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+
+    events, dispatched = [], []
+    monkeypatch.setattr(pipeline, "session_scope", fake_scope)
+    monkeypatch.setattr(
+        pipeline, "record_event", lambda _s, event, detail, **kw: events.append((event, detail))
+    )
+    monkeypatch.setattr(
+        pipeline, "fetch_and_clean_task",
+        SimpleNamespace(delay=lambda ann_id, auto: dispatched.append(ann_id)),
+    )
+
+    pipeline.pipeline_sweep_task.run()
+
+    with Session(engine) as session:
+        stuck = session.get(Announcement, 901)
+        assert stuck.status == AnnouncementStatus.SKIPPED.value
+        assert pipeline.SKIP_STALE_NOTE in stuck.error and "boom" in stuck.error
+        assert session.get(Announcement, 902).status == AnnouncementStatus.CRAWLED.value
+    assert dispatched == [902]
+    assert any(e == "extract.skip_stale" and "1 条" in d for e, d in events)
+
+
 def test_ensure_cst():
     """采集解析出的 naive 北京时间入库前补东八区；已带时区/空值原样返回。"""
     from datetime import datetime, timedelta

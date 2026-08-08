@@ -55,6 +55,7 @@ const ACTION_GROUPS = [
 const EVENT_LABELS: Record<string, string> = {
   'crawl.round': '采集轮次',
   'backpressure.pause': '背压暂停',
+  'clean.failure': '清洗失败',
   'extract.skip_stale': '放弃过期公告',
   'pipeline.sweep': '流水线补偿',
   'llm.probe': 'LLM 探针模式',

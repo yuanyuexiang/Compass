@@ -294,8 +294,28 @@ def run_ai_extract(session: Session, announcement_id: int) -> Project:
 
 @celery.task(name="app.tasks.pipeline.fetch_and_clean", max_retries=2, default_retry_delay=120)
 def fetch_and_clean_task(announcement_id: int, automatic: bool = False) -> None:
-    with session_scope() as session:
-        run_fetch_and_clean(session, announcement_id)
+    try:
+        with session_scope() as session:
+            run_fetch_and_clean(session, announcement_id)
+    except Exception as exc:
+        # 与 ai_extract_task 同理：异常随主事务回滚会让公告无声卡回 crawled，被 sweep
+        # 每小时重派空转且前台看不到原因（实测 9 条卡死两天）。独立事务落 failed+error，
+        # 由 sweep 的 failed 通道按 6 小时节奏重试，直到成功或超时效放弃。
+        from app.core.ratelimit import acquire_cooldown
+
+        with session_scope() as session:
+            ann = session.get(Announcement, announcement_id)
+            if ann is not None:
+                ann.status = AnnouncementStatus.FAILED.value
+                ann.error = str(exc)[:2000]
+            # 批量卡死时每条都记会刷屏，30 分钟采样一条代表性错误进运行日志
+            if acquire_cooldown("evt_clean_failure", 1800):
+                record_event(
+                    session, "clean.failure",
+                    f"公告清洗失败 ann={announcement_id}：{str(exc)[:300]}",
+                    level="warning",
+                )
+        raise
     if not automatic or automatic_llm_allowed():
         ai_extract_task.delay(announcement_id, automatic)
     else:
@@ -491,7 +511,10 @@ def announcement_stale_clause(deadline: datetime):
 
 
 def announcement_is_stale(ann: Announcement, deadline: datetime) -> bool:
-    return (ann.publish_time or ann.created_at) < deadline
+    ts = ann.publish_time or ann.created_at
+    if ts.tzinfo is None:  # SQLite 等后端回读丢失时区信息时按 UTC 兜底
+        ts = ts.replace(tzinfo=UTC)
+    return ts < deadline
 
 
 def skip_stale_extract_backlog(session: Session, now: datetime | None = None) -> int:
@@ -648,20 +671,36 @@ def pipeline_sweep_task() -> None:
             .order_by(Announcement.updated_at)
             .limit(20)
         ).all()
+        skipped_stale = 0
         for ann in stuck + failed:
             if ann.status == "crawled" or (ann.status == "failed" and not ann.clean_text):
+                # 清洗通道同样受时效闸门（熔断）：反复清洗失败的卡死公告不能无限重派，
+                # 超时效即放弃；放弃时保留此前错误现场，便于事后定位根因
+                if announcement_is_stale(ann, deadline):
+                    ann.status = AnnouncementStatus.SKIPPED.value
+                    ann.error = (
+                        f"{SKIP_STALE_NOTE}（此前错误：{ann.error[:300]}）"
+                        if ann.error else SKIP_STALE_NOTE
+                    )
+                    skipped_stale += 1
+                    continue
                 dispatch.append(("clean", ann.id))
             elif ann.status in ("cleaned", "attachments_parsed") or ann.status == "failed":
                 # 超时效不再自动重试提取（含 failed 重试），直接放弃省 token
                 if announcement_is_stale(ann, deadline):
                     ann.status = AnnouncementStatus.SKIPPED.value
                     ann.error = SKIP_STALE_NOTE
+                    skipped_stale += 1
                     continue
                 if not llm_allowed:
                     continue
                 dispatch.append(("extract", ann.id))
             else:  # ai_extracted / embedded：只差发布
                 dispatch.append(("publish", ann.id))
+        if skipped_stale:
+            record_event(
+                session, "extract.skip_stale", f"流水线补偿放弃超时效公告 {skipped_stale} 条"
+            )
         if dispatch:
             counts = {k: sum(1 for x, _ in dispatch if x == k) for k in {x for x, _ in dispatch}}
             record_event(session, "pipeline.sweep", f"流水线补偿重派 {len(dispatch)} 条：{counts}")
