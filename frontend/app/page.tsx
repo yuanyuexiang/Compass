@@ -34,7 +34,14 @@ import {
 } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch, getCachedUser } from '@/lib/api';
-import { FOLLOW_STATUSES, RISK_KEYS, RISK_LABELS, formatBudget, pipelineStatusLabel } from '@/lib/labels';
+import {
+  FOLLOW_STATUSES,
+  RISK_KEYS,
+  RISK_LABELS,
+  formatBudget,
+  formatDateTime,
+  pipelineStatusLabel,
+} from '@/lib/labels';
 import type { Advice, FollowStatus, Recommendation, Stats, User } from '@/lib/types';
 
 /** 系统健康（GET /api/admin/health，仅平台管理员） */
@@ -357,7 +364,7 @@ function HealthPanel({ health }: { health: HealthData | null }) {
               style={{ margin: '8px 0 0' }}
             >
               {health.llm.ok
-                ? `最近成功：${health.llm.last_success_at ?? '暂无记录'}`
+                ? `最近成功：${health.llm.last_success_at ? formatDateTime(health.llm.last_success_at) : '暂无记录'}`
                 : health.llm.last_error ?? '暂无错误详情'}
             </Typography.Paragraph>
             {health.llm.fallback_last ? <Tag color="orange">已触发备用模型</Tag> : null}
@@ -381,7 +388,10 @@ function HealthPanel({ health }: { health: HealthData | null }) {
               {health.scheduler.interval_minutes} 分钟
             </Typography.Title>
             <Typography.Text type="secondary">
-              上次自动采集：{health.scheduler.last_auto_crawl_at ?? '暂无记录'}
+              上次自动采集：
+              {health.scheduler.last_auto_crawl_at
+                ? formatDateTime(health.scheduler.last_auto_crawl_at)
+                : '暂无记录'}
             </Typography.Text>
             <div style={{ marginTop: 8 }}>
               {health.scheduler.paused_reason ? (
