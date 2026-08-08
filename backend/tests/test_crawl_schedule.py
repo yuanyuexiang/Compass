@@ -3,7 +3,12 @@ from datetime import UTC, datetime
 import pytest
 
 from app.api.routes.sources import ScheduleIn
-from app.tasks.pipeline import automatic_llm_allowed, crawl_is_due, next_automatic_llm_start
+from app.tasks.pipeline import (
+    auto_window_minutes_between,
+    automatic_llm_allowed,
+    crawl_is_due,
+    next_automatic_llm_start,
+)
 
 NOW = datetime(2026, 7, 8, 12, 0, 0, tzinfo=UTC)
 
@@ -47,6 +52,37 @@ def test_automatic_llm_beijing_window(hour, minute, allowed):
 
     now = datetime(2026, 7, 8, hour, minute, tzinfo=BEIJING_TZ)
     assert automatic_llm_allowed(now) is allowed
+
+
+def test_auto_window_minutes_freezes_overnight():
+    """夜间关窗时段不计入调度间隔——健康面板凌晨不得误报停摆。
+
+    实测复盘：当晚最后一轮 21:41（北京），凌晨 01:15 看工作台，裸时间差 214 分钟
+    已超 3×60 阈值挂出「采集疑似停摆」，而窗口内时间其实只走了 49 分钟。
+    """
+    last_round = datetime(2026, 8, 8, 13, 41, 0, tzinfo=UTC)  # 北京 21:41
+    midnight_check = datetime(2026, 8, 8, 17, 15, 0, tzinfo=UTC)  # 北京次日 01:15
+    assert auto_window_minutes_between(last_round, midnight_check) == pytest.approx(49)
+
+
+def test_auto_window_minutes_resumes_next_morning():
+    # 北京 21:41 → 次日 08:00：昨晚尾巴 49 分钟 + 今晨开窗后 30 分钟
+    last_round = datetime(2026, 8, 8, 13, 41, 0, tzinfo=UTC)
+    next_morning = datetime(2026, 8, 9, 0, 0, 0, tzinfo=UTC)  # 北京 08:00
+    assert auto_window_minutes_between(last_round, next_morning) == pytest.approx(79)
+
+
+def test_auto_window_minutes_zero_when_fully_closed():
+    start = datetime(2026, 8, 8, 15, 0, 0, tzinfo=UTC)  # 北京 23:00
+    end = datetime(2026, 8, 8, 22, 0, 0, tzinfo=UTC)  # 北京次日 06:00
+    assert auto_window_minutes_between(start, end) == 0.0
+    assert auto_window_minutes_between(end, start) == 0.0  # 逆序防御
+
+
+def test_auto_window_minutes_plain_gap_inside_window():
+    start = datetime(2026, 8, 8, 2, 0, 0, tzinfo=UTC)  # 北京 10:00
+    end = datetime(2026, 8, 8, 4, 0, 0, tzinfo=UTC)  # 北京 12:00
+    assert auto_window_minutes_between(start, end) == pytest.approx(120)
 
 
 def test_next_automatic_llm_start_is_next_morning():

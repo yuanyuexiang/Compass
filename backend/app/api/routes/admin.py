@@ -233,6 +233,8 @@ def system_health(current: CurrentUser = PlatformAdminDep) -> dict:
     """系统健康总览：流水线积压、24h 吞吐、LLM 状态、采集源与调度活性。
 
     历史教训：DeepSeek 欠费是客户先发现的——平台方必须先于用户看到异常。"""
+    from app.tasks.pipeline import auto_pipeline_backpressure, auto_window_minutes_between
+
     now = datetime.now(UTC)
     day_ago = now - timedelta(hours=24)
     with session_scope() as session:
@@ -280,10 +282,13 @@ def system_health(current: CurrentUser = PlatformAdminDep) -> dict:
 
         interval = int(get_setting(session, KEY_CRAWL_INTERVAL, DEFAULT_CRAWL_INTERVAL_MINUTES))
         last_auto = get_setting(session, KEY_LAST_AUTO_CRAWL)
+        pause_reason = auto_pipeline_backpressure(session, now)
 
+    # 调度活性按窗口内时间算：夜间关窗不采集是设计行为，裸时间差会每天凌晨误报停摆；
+    # 背压暂停同理——采集是主动停的，不算 beat 故障（暂停原因单独透出）。
     beat_ok = True
-    if last_auto:
-        gap = (now - datetime.fromisoformat(last_auto)).total_seconds() / 60
+    if last_auto and not pause_reason:
+        gap = auto_window_minutes_between(datetime.fromisoformat(last_auto), now)
         beat_ok = gap < max(interval * 3, 10)
 
     llm_failures = counter_get("llm_failures")
@@ -304,6 +309,7 @@ def system_health(current: CurrentUser = PlatformAdminDep) -> dict:
             "ok": beat_ok,
             "last_auto_crawl_at": last_auto,
             "interval_minutes": interval,
+            "paused_reason": pause_reason,
         },
         "stale_sources": stale_sources,
     }

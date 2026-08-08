@@ -54,6 +54,33 @@ def automatic_llm_allowed(now: datetime | None = None) -> bool:
     return minute >= AUTO_LLM_START_MINUTE or minute < AUTO_LLM_END_MINUTE
 
 
+def auto_window_minutes_between(start: datetime, end: datetime) -> float:
+    """两个时刻之间落在自动 LLM 时间窗内的分钟数（按北京时间逐日累计）。
+
+    调度活性判断用它代替裸时间差：夜间关窗是设计行为（crawl_tick 直接跳过、
+    不更新 last_auto_crawl），照墙上时钟算间隔会让健康面板每天凌晨误报停摆。
+    """
+    from app.core.kv import AUTO_LLM_END_MINUTE, AUTO_LLM_START_MINUTE
+
+    if end <= start:
+        return 0.0
+    if AUTO_LLM_START_MINUTE > AUTO_LLM_END_MINUTE:  # 跨零点窗口暂不支持，退化为裸时间差
+        return (end - start).total_seconds() / 60
+    local_start = start.astimezone(BEIJING_TZ)
+    local_end = end.astimezone(BEIJING_TZ)
+    total = 0.0
+    day = local_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    while day < local_end:
+        window_start = day + timedelta(minutes=AUTO_LLM_START_MINUTE)
+        window_end = day + timedelta(minutes=AUTO_LLM_END_MINUTE)
+        lo = max(local_start, window_start)
+        hi = min(local_end, window_end)
+        if hi > lo:
+            total += (hi - lo).total_seconds() / 60
+        day += timedelta(days=1)
+    return total
+
+
 def next_automatic_llm_start(now: datetime | None = None) -> datetime:
     """返回下一次自动 LLM 窗口起点（UTC），供跨越关窗时刻的任务安全延期。"""
     from app.core.kv import AUTO_LLM_START_MINUTE

@@ -49,7 +49,13 @@ interface HealthData {
     fallback_last: string | null;
     last_success_at: string | null;
   };
-  scheduler: { ok: boolean; last_auto_crawl_at: string | null; interval_minutes: number };
+  scheduler: {
+    ok: boolean;
+    last_auto_crawl_at: string | null;
+    interval_minutes: number;
+    /** 背压暂停原因（LLM 连败/积压达阈值）；有值时采集是主动暂停，不是停摆 */
+    paused_reason: string | null;
+  };
   stale_sources: { id: number; name: string; last_run_at: string | null }[];
 }
 
@@ -360,8 +366,16 @@ function HealthPanel({ health }: { health: HealthData | null }) {
         <Col xs={24} lg={8}>
           <HealthCell
             title="采集调度"
-            status={health.scheduler.ok ? '正常' : '疑似停摆'}
-            statusColor={health.scheduler.ok ? 'green' : 'orange'}
+            status={
+              health.scheduler.paused_reason
+                ? '背压暂停'
+                : health.scheduler.ok
+                  ? '正常'
+                  : '疑似停摆'
+            }
+            statusColor={
+              health.scheduler.paused_reason ? 'gold' : health.scheduler.ok ? 'green' : 'orange'
+            }
           >
             <Typography.Title level={4} style={{ margin: 0 }}>
               {health.scheduler.interval_minutes} 分钟
@@ -370,6 +384,9 @@ function HealthPanel({ health }: { health: HealthData | null }) {
               上次自动采集：{health.scheduler.last_auto_crawl_at ?? '暂无记录'}
             </Typography.Text>
             <div style={{ marginTop: 8 }}>
+              {health.scheduler.paused_reason ? (
+                <Tag color="gold">{health.scheduler.paused_reason}</Tag>
+              ) : null}
               {health.stale_sources.length ? (
                 <Tooltip title={health.stale_sources.map((s) => s.name).join('、')}>
                   <Tag color="orange">{health.stale_sources.length} 个源 48h 无新公告</Tag>
@@ -412,6 +429,7 @@ function PlatformStatusBanner({ stats, health }: { stats: Stats | null; health: 
   const problems: string[] = [];
   if (health && !health.llm.ok) problems.push(`AI 连续失败 ${health.llm.consecutive_failures} 次`);
   if (health && !health.scheduler.ok) problems.push('采集疑似停摆');
+  if (health?.scheduler.paused_reason) problems.push(`自动采集背压暂停（${health.scheduler.paused_reason}）`);
   if (health?.stale_sources.length) problems.push(`${health.stale_sources.length} 个源 48h 无新公告`);
   if (stats?.platform?.pending_tenants) problems.push(`${stats.platform.pending_tenants} 个企业待审批`);
   if (stats?.platform?.pending_sources) problems.push(`${stats.platform.pending_sources} 个数据源待审批`);
