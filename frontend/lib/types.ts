@@ -263,13 +263,19 @@ export interface ProfileMaterialItem {
 }
 
 export interface ProjectCaseFactValue {
-  project_name: string;
-  company_role: 'winner' | 'supplier' | 'consortium_member' | 'candidate' | 'mentioned' | 'unknown';
-  customer: string | null;
-  amount_yuan: number | null;
-  region: string | null;
-  awarded_at: string | null;
-  services: string[];
+  project_name?: string;
+  company_role?: 'winner' | 'supplier' | 'consortium_member' | 'candidate' | 'mentioned' | 'unknown';
+  customer?: string | null;
+  amount_yuan?: number | null;
+  region?: string | null;
+  awarded_at?: string | null;
+  services?: string[];
+  name?: string;
+  description?: string;
+  status?: 'current' | 'planned';
+  issuer?: string | null;
+  valid_until?: string | null;
+  relationship?: string;
 }
 
 export interface ProfileFactItem {

@@ -62,6 +62,37 @@ def test_extract_award_facts_keeps_only_grounded_evidence(monkeypatch):
     assert captured["scene"] == "profile_material"
 
 
+def test_extract_capability_facts_marks_grounded_planned_capability(monkeypatch):
+    text = "[第2页]\n未来计划推出园区能耗管理平台。"
+    payload = {
+        "facts": [
+            {
+                "fact_type": "product_capability",
+                "value": {
+                    "name": "园区能耗管理平台",
+                    "description": "能耗管理",
+                    "status": "planned",
+                },
+                "evidence_quote": "未来计划推出园区能耗管理平台。",
+                "evidence_page": 2,
+            },
+            {
+                "fact_type": "service_capability",
+                "value": {"name": "虚构服务", "status": "current"},
+                "evidence_quote": "原文没有这句话",
+                "evidence_page": 2,
+            },
+        ]
+    }
+    monkeypatch.setattr(profile_materials, "extract_completion", lambda **_: _completion(payload))
+
+    facts = profile_materials.extract_capability_facts(text, tenant_id=7)
+    assert len(facts) == 1
+    assert facts[0].fact_type == "product_capability"
+    assert facts[0].value["status"] == "planned"
+    assert evidence_page(facts[0].evidence_quote, text) == 2
+
+
 def test_case_normalization_and_display():
     case = ProjectCaseValue(
         project_name="某医院弱电改造",

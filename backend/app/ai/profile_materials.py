@@ -1,7 +1,6 @@
 """企业上传画像材料 → 原子事实与证据。
 
-第一版聚焦中标通知书/中标公告的结构化项目案例。抽取结果始终是 pending，
-只有用户确认后才会进入正式画像。
+支持履约证明与企业能力资料。抽取结果始终是 pending，只有用户确认后才进入正式画像。
 """
 
 import json
@@ -13,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.llm_config import extract_completion
 from app.ai.prompts.profile_material_award_v1 import PROFILE_MATERIAL_AWARD_PROMPT_V1
+from app.ai.prompts.profile_material_capability_v1 import PROFILE_MATERIAL_CAPABILITY_PROMPT_V1
 from app.models import ProfileEvidence, ProfileFact, ProfileMaterial
 
 MATERIAL_TEXT_LIMIT = 20_000
@@ -23,6 +23,34 @@ ACCEPTED_ROLES = {
     "candidate",
     "mentioned",
     "unknown",
+}
+CAPABILITY_FACT_TYPES = {
+    "product_capability",
+    "service_capability",
+    "industry_capability",
+    "certification",
+    "brand_partnership",
+    "company_description",
+}
+DOCUMENT_SOURCE_STRENGTH = {
+    "award_notice": "contract_proof",
+    "contract": "contract_proof",
+    "acceptance_report": "acceptance_proof",
+    "qualification": "certificate_proof",
+    "case_study": "case_supported",
+    "company_presentation": "self_declared",
+    "solution": "self_declared",
+    "product_manual": "self_declared",
+    "whitepaper": "self_declared",
+    "other": "self_declared",
+}
+SOURCE_STRENGTH_RANK = {
+    "self_declared": 1,
+    "case_supported": 2,
+    "contract_proof": 3,
+    "certificate_proof": 3,
+    "acceptance_proof": 4,
+    "tenant_confirmed": 5,
 }
 
 
@@ -57,6 +85,51 @@ class AwardExtraction(BaseModel):
     facts: list[ExtractedAwardFact] = []
 
 
+class ExtractedCapabilityFact(BaseModel):
+    fact_type: str
+    value: dict
+    evidence_quote: str = Field(min_length=2, max_length=500)
+    evidence_page: int | None = Field(default=None, ge=1)
+
+    @field_validator("fact_type")
+    @classmethod
+    def validate_fact_type(cls, value: str) -> str:
+        if value not in CAPABILITY_FACT_TYPES | {"project_case"}:
+            raise ValueError("unsupported fact type")
+        return value
+
+
+class CapabilityExtraction(BaseModel):
+    facts: list[ExtractedCapabilityFact] = []
+
+
+def validate_fact_value(fact_type: str, value: dict) -> dict:
+    """确认前的最小结构校验；保留扩展字段，拒绝没有主体内容的事实。"""
+    if fact_type == "project_case":
+        return ProjectCaseValue.model_validate(value).model_dump()
+    cleaned = dict(value)
+    if fact_type == "company_description":
+        description = str(cleaned.get("description") or "").strip()
+        if len(description) < 2:
+            raise ValueError("企业简介不能为空")
+        cleaned["description"] = description
+        return cleaned
+    name = str(cleaned.get("name") or "").strip()
+    if len(name) < 2:
+        raise ValueError("事实名称不能为空")
+    cleaned["name"] = name
+    if fact_type in {
+        "product_capability",
+        "service_capability",
+        "industry_capability",
+    }:
+        status = cleaned.get("status", "current")
+        if status not in {"current", "planned"}:
+            raise ValueError("能力状态无效")
+        cleaned["status"] = status
+    return cleaned
+
+
 def _compact(value: str) -> str:
     return re.sub(r"\s+", "", value)
 
@@ -78,6 +151,11 @@ def evidence_page(quote: str, text: str) -> int | None:
 
 def canonical_case_key(project_name: str) -> str:
     return re.sub(r"[^\w\u4e00-\u9fff]", "", project_name).lower()[:256]
+
+
+def canonical_fact_key(fact_type: str, value: dict) -> str:
+    raw = value.get("project_name") or value.get("name") or value.get("description") or ""
+    return f"{fact_type}:{canonical_case_key(str(raw))}"[:256]
 
 
 def format_case_line(case: ProjectCaseValue) -> str:
@@ -105,6 +183,24 @@ def extract_award_facts(text: str, tenant_id: int) -> list[ExtractedAwardFact]:
     return [fact for fact in parsed.facts if evidence_is_grounded(fact.evidence_quote, text)]
 
 
+def extract_capability_facts(text: str, tenant_id: int) -> list[ExtractedCapabilityFact]:
+    resp = extract_completion(
+        messages=[
+            {"role": "system", "content": PROFILE_MATERIAL_CAPABILITY_PROMPT_V1},
+            {"role": "user", "content": text[:MATERIAL_TEXT_LIMIT]},
+        ],
+        temperature=0.0,
+        scene="profile_material",
+        tenant_id=tenant_id,
+    )
+    content = resp.choices[0].message.content or ""
+    start, end = content.find("{"), content.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("AI 未返回有效 JSON")
+    parsed = CapabilityExtraction.model_validate(json.loads(content[start : end + 1]))
+    return [fact for fact in parsed.facts if evidence_is_grounded(fact.evidence_quote, text)]
+
+
 def run_material_extraction(session: Session, material_id: int) -> int:
     """抽取单份材料并写入 pending 事实，返回新增数量；支持失败后幂等重试。"""
     material = session.get(ProfileMaterial, material_id)
@@ -112,8 +208,6 @@ def run_material_extraction(session: Session, material_id: int) -> int:
         raise ValueError(f"画像材料 {material_id} 不存在")
     if not material.parsed_text:
         raise ValueError("材料没有可提取文本")
-    if material.document_type != "award_notice":
-        raise ValueError("当前版本仅支持从中标/成交通知材料抽取案例")
 
     existing_fact_ids = session.scalars(
         select(ProfileEvidence.fact_id).where(ProfileEvidence.material_id == material.id)
@@ -137,8 +231,18 @@ def run_material_extraction(session: Session, material_id: int) -> int:
 
     material.parse_status = "extracting"
     material.error = None
-    facts = extract_award_facts(material.parsed_text, material.tenant_id)
+    if material.document_type == "award_notice":
+        facts = extract_award_facts(material.parsed_text, material.tenant_id)
+    else:
+        facts = extract_capability_facts(material.parsed_text, material.tenant_id)
     for extracted in facts:
+        fact_type = getattr(extracted, "fact_type", "project_case")
+        value = (
+            extracted.model_dump(exclude={"fact_type", "evidence_quote", "evidence_page"})
+            if fact_type == "project_case" and isinstance(extracted, ExtractedAwardFact)
+            else extracted.value
+        )
+        company_role = value.get("company_role", "unknown")
         confidence = {
             "winner": 0.95,
             "supplier": 0.9,
@@ -146,31 +250,41 @@ def run_material_extraction(session: Session, material_id: int) -> int:
             "candidate": 0.55,
             "mentioned": 0.25,
             "unknown": 0.4,
-        }[extracted.company_role]
-        key = canonical_case_key(extracted.project_name)
+        }.get(company_role, 0.75)
+        if value.get("status") == "planned":
+            confidence = min(confidence, 0.35)
+        key = canonical_fact_key(fact_type, value)
         fact = session.scalar(
             select(ProfileFact).where(
                 ProfileFact.tenant_id == material.tenant_id,
-                ProfileFact.fact_type == "project_case",
+                ProfileFact.fact_type == fact_type,
                 ProfileFact.canonical_key == key,
                 ProfileFact.status != "rejected",
             )
         )
         if fact is None:
-            value = extracted.model_dump(exclude={"evidence_quote", "evidence_page"})
             fact = ProfileFact(
                 tenant_id=material.tenant_id,
-                fact_type="project_case",
+                fact_type=fact_type,
                 canonical_key=key,
                 value=value,
                 confidence=confidence,
-                source_strength="document_proof",
+                source_strength=DOCUMENT_SOURCE_STRENGTH.get(
+                    material.document_type, "self_declared"
+                ),
                 status="pending",
             )
             session.add(fact)
             session.flush()
         else:
             fact.confidence = max(fact.confidence, confidence)
+            candidate_strength = DOCUMENT_SOURCE_STRENGTH.get(
+                material.document_type, "self_declared"
+            )
+            if SOURCE_STRENGTH_RANK.get(candidate_strength, 0) > SOURCE_STRENGTH_RANK.get(
+                fact.source_strength, 0
+            ):
+                fact.source_strength = candidate_strength
         already_linked = session.scalar(
             select(ProfileEvidence.id).where(
                 ProfileEvidence.fact_id == fact.id,
@@ -186,7 +300,10 @@ def run_material_extraction(session: Session, material_id: int) -> int:
                 material_id=material.id,
                 page=evidence_page(extracted.evidence_quote, material.parsed_text),
                 quote=extracted.evidence_quote,
-                metadata_json={"company_role": extracted.company_role},
+                metadata_json={
+                    "company_role": company_role,
+                    "document_type": material.document_type,
+                },
             )
         )
     material.parse_status = "extracted" if facts else "no_facts"
@@ -224,4 +341,43 @@ def project_confirmed_case(session: Session, fact: ProfileFact, value: dict) -> 
         existing_lines.append(case_line)
     data["cases_text"] = "\n".join(existing_lines)
     data["services"] = list(dict.fromkeys([*(data.get("services") or []), *case.services]))
+    upsert_profile(session, fact.tenant_id, data)
+
+
+def project_confirmed_fact(session: Session, fact: ProfileFact, value: dict) -> None:
+    """把经人工确认的多类事实投影到兼容画像字段。规划能力只保留事实，不参与匹配。"""
+    if fact.fact_type == "project_case":
+        project_confirmed_case(session, fact, value)
+        return
+
+    from app.matching.profiles import upsert_profile
+    from app.models import CompanyProfile, Tenant
+
+    if value.get("status") == "planned":
+        return
+    field_by_type = {
+        "product_capability": "products",
+        "service_capability": "services",
+        "industry_capability": "industries",
+        "certification": "certifications",
+        "brand_partnership": "brands",
+    }
+    profile = session.scalar(
+        select(CompanyProfile).where(CompanyProfile.tenant_id == fact.tenant_id)
+    )
+    tenant = session.get(Tenant, fact.tenant_id)
+    data = dict(profile.data or {}) if profile else {"name": tenant.name}
+    for key in ("products", "services", "industries", "regions", "certifications", "brands"):
+        data.setdefault(key, [])
+    data.setdefault("description", "")
+    data.setdefault("cases_text", "")
+    data.setdefault("filter", {"regions": [], "min_budget": None})
+    if fact.fact_type == "company_description":
+        description = str(value.get("description") or "").strip()
+        if description and not data["description"]:
+            data["description"] = description
+    elif field := field_by_type.get(fact.fact_type):
+        name = str(value.get("name") or "").strip()
+        if name:
+            data[field] = list(dict.fromkeys([*(data.get(field) or []), name]))
     upsert_profile(session, fact.tenant_id, data)

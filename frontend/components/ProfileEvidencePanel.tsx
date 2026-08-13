@@ -54,6 +54,39 @@ const ROLE_LABELS: Record<string, string> = {
   unknown: '角色待确认',
 };
 
+const DOCUMENT_TYPES = [
+  { value: 'auto', label: '自动识别（推荐）' },
+  { value: 'award_notice', label: '中标/成交材料' },
+  { value: 'contract', label: '合同材料' },
+  { value: 'acceptance_report', label: '验收材料' },
+  { value: 'company_presentation', label: '公司介绍/演示 PPT' },
+  { value: 'solution', label: '解决方案' },
+  { value: 'case_study', label: '案例集' },
+  { value: 'product_manual', label: '产品手册' },
+  { value: 'whitepaper', label: '技术白皮书' },
+  { value: 'qualification', label: '资质与认证' },
+  { value: 'other', label: '其他企业资料' },
+];
+
+const FACT_LABELS: Record<string, string> = {
+  project_case: '项目案例',
+  product_capability: '产品能力',
+  service_capability: '服务能力',
+  industry_capability: '行业能力',
+  certification: '资质认证',
+  brand_partnership: '合作品牌',
+  company_description: '企业简介',
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  self_declared: '企业自述',
+  case_supported: '案例佐证',
+  contract_proof: '合同/中标佐证',
+  acceptance_proof: '验收佐证',
+  certificate_proof: '证书佐证',
+  tenant_confirmed: '人工确认',
+};
+
 export default function ProfileEvidencePanel({
   onProfileChanged,
   section = 'all',
@@ -68,6 +101,7 @@ export default function ProfileEvidencePanel({
   const [facts, setFacts] = useState<ProfileFactItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [documentType, setDocumentType] = useState('auto');
   const [editing, setEditing] = useState<ProfileFactItem | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [caseForm] = Form.useForm<ProjectCaseFactValue>();
@@ -103,9 +137,9 @@ export default function ProfileEvidencePanel({
     try {
       const body = new FormData();
       body.append('file', file, filename);
-      body.append('document_type', 'award_notice');
+      body.append('document_type', documentType);
       await apiFetch('/api/profile/materials', { method: 'POST', body });
-      message.success('材料已上传，AI 将在后台提取候选案例');
+      message.success('资料已上传，AI 将在后台提取候选能力事实');
       await load();
     } catch (error) {
       message.error((error as Error).message);
@@ -148,7 +182,7 @@ export default function ProfileEvidencePanel({
         method: 'POST',
         body: JSON.stringify({ value }),
       });
-      message.success('案例已确认并写入正式画像');
+      message.success('事实已确认并写入正式画像');
       setEditing(null);
       await Promise.all([load(), onProfileChanged()]);
     } catch (error) {
@@ -177,12 +211,16 @@ export default function ProfileEvidencePanel({
         <Alert
           type="info"
           showIcon
-          message="首版支持中标通知书、中标公告和成交材料（PDF、DOCX、TXT，最大 20MB）"
+          message="支持企业演示、解决方案、案例、履约与资质材料（PDF、PPTX、DOCX、TXT，最大 20MB）"
           description="请先移除身份证号、银行账户、签名等不需要进入画像的敏感信息。AI 结果必须经你确认才会影响正式画像。"
           style={{ marginBottom: 14 }}
         />
+        <Space direction="vertical" style={{ width: '100%', marginBottom: 12 }}>
+          <Typography.Text strong>资料类型</Typography.Text>
+          <Select value={documentType} options={DOCUMENT_TYPES} onChange={setDocumentType} style={{ width: 260 }} />
+        </Space>
         <Upload.Dragger
-          accept=".pdf,.docx,.txt"
+          accept=".pdf,.pptx,.docx,.txt"
           multiple={false}
           showUploadList={false}
           disabled={uploading}
@@ -197,8 +235,8 @@ export default function ProfileEvidencePanel({
           }}
         >
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-          <p className="ant-upload-text">点击或拖入企业中标材料</p>
-          <p className="ant-upload-hint">原件按租户隔离保存，AI 仅抽取带原文证据的项目案例</p>
+          <p className="ant-upload-text">点击或拖入企业资料</p>
+          <p className="ant-upload-hint">原件按租户隔离保存，AI 仅生成带页码和原文证据的候选事实</p>
         </Upload.Dragger>
 
         <List
@@ -241,7 +279,7 @@ export default function ProfileEvidencePanel({
                   title={<Space wrap><span>{item.filename}</span><Tag color={status.color}>{status.label}</Tag></Space>}
                   description={
                     <Space direction="vertical" size={2}>
-                      <span>{formatDateTime(item.created_at)} · 已发现 {item.fact_count} 条事实</span>
+                      <span>{DOCUMENT_TYPES.find((type) => type.value === item.document_type)?.label || item.document_type} · {formatDateTime(item.created_at)} · 已发现 {item.fact_count} 条事实</span>
                       {item.error ? <Typography.Text type="danger">{item.error}</Typography.Text> : null}
                     </Space>
                   }
@@ -266,7 +304,7 @@ export default function ProfileEvidencePanel({
                   <Button key="confirm" type="primary" icon={<CheckOutlined />} onClick={() => openConfirm(fact)}>
                     核对并确认
                   </Button>,
-                  <Popconfirm key="reject" title="忽略这条候选案例？" onConfirm={() => void rejectFact(fact.id)}>
+                  <Popconfirm key="reject" title="忽略这条候选事实？" onConfirm={() => void rejectFact(fact.id)}>
                     <Button danger>忽略</Button>
                   </Popconfirm>,
                 ]}
@@ -274,8 +312,11 @@ export default function ProfileEvidencePanel({
                 <List.Item.Meta
                   title={
                     <Space wrap>
-                      <Typography.Text strong>{fact.value.project_name}</Typography.Text>
-                      <Tag color="blue">{ROLE_LABELS[fact.value.company_role]}</Tag>
+                        <Typography.Text strong>{fact.value.project_name || fact.value.name || fact.value.description}</Typography.Text>
+                      <Tag color="blue">{FACT_LABELS[fact.fact_type] || fact.fact_type}</Tag>
+                      {fact.value.company_role ? <Tag>{ROLE_LABELS[fact.value.company_role]}</Tag> : null}
+                      {fact.value.status === 'planned' ? <Tag color="warning">规划能力</Tag> : null}
+                      <Tag>{SOURCE_LABELS[fact.source_strength] || fact.source_strength}</Tag>
                       <Tag color={fact.confidence >= 0.8 ? 'green' : 'orange'}>
                         可信度 {Math.round(fact.confidence * 100)}%
                       </Tag>
@@ -288,6 +329,7 @@ export default function ProfileEvidencePanel({
                           ? `${fact.value.amount_yuan / 10000} 万元`
                           : null].filter(Boolean).join(' · ') || '项目字段待补充'}
                       </span>
+                      {fact.value.description && fact.fact_type !== 'company_description' ? <span>{fact.value.description}</span> : null}
                       {fact.value.services?.length ? (
                         <Space size={[4, 4]} wrap>{fact.value.services.map((item) => <Tag key={item}>{item}</Tag>)}</Space>
                       ) : null}
@@ -331,7 +373,7 @@ export default function ProfileEvidencePanel({
                     “{editing.evidence.quote}”
                   </Typography.Paragraph>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    右侧内容由 AI 从这段原文提取，请重点核对企业角色、金额和项目名称。
+                    右侧内容由 AI 从这段原文提取，请核对事实内容、当前/规划状态及证据是否一致。
                   </Typography.Text>
                 </Space>
               </div>
@@ -340,6 +382,30 @@ export default function ProfileEvidencePanel({
           <Col xs={24} md={15}>
             <Typography.Text strong>将写入画像的内容</Typography.Text>
             <Form form={caseForm} layout="vertical" style={{ marginTop: 10 }}>
+              {editing?.fact_type !== 'project_case' ? (
+                <>
+                  {editing?.fact_type === 'company_description' ? (
+                    <Form.Item name="description" label="企业简介" rules={[{ required: true, message: '请填写企业简介' }]}>
+                      <Input.TextArea rows={6} />
+                    </Form.Item>
+                  ) : (
+                    <>
+                      <Form.Item name="name" label="事实名称" rules={[{ required: true, message: '请填写名称' }]}><Input /></Form.Item>
+                      <Form.Item name="description" label="能力说明"><Input.TextArea rows={3} /></Form.Item>
+                      {['product_capability', 'service_capability', 'industry_capability'].includes(editing?.fact_type || '') ? (
+                        <Form.Item name="status" label="能力状态" rules={[{ required: true }]}>
+                          <Select options={[{ value: 'current', label: '当前能力' }, { value: 'planned', label: '规划能力（不参与匹配）' }]} />
+                        </Form.Item>
+                      ) : null}
+                      {editing?.fact_type === 'certification' ? <>
+                        <Form.Item name="issuer" label="颁发机构"><Input /></Form.Item>
+                        <Form.Item name="valid_until" label="有效期至"><Input /></Form.Item>
+                      </> : null}
+                      {editing?.fact_type === 'brand_partnership' ? <Form.Item name="relationship" label="合作关系"><Input /></Form.Item> : null}
+                    </>
+                  )}
+                </>
+              ) : <>
               <Form.Item name="project_name" label="项目名称" rules={[{ required: true, message: '请填写项目名称' }]}>
                 <Input />
               </Form.Item>
@@ -363,6 +429,7 @@ export default function ProfileEvidencePanel({
               <Form.Item name="services" label="明确交付范围">
                 <Select mode="tags" tokenSeparators={[',', '，', '、', ';', '；']} />
               </Form.Item>
+              </>}
             </Form>
           </Col>
         </Row>

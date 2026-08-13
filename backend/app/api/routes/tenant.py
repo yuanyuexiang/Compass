@@ -13,7 +13,7 @@ from sqlalchemy import and_, delete, func, select
 from app.ai import websearch
 from app.ai.llm_config import friendly_llm_error
 from app.ai.nl_search import parse_query
-from app.ai.profile_materials import ProjectCaseValue, project_confirmed_case
+from app.ai.profile_materials import project_confirmed_fact, validate_fact_value
 from app.ai.profile_suggest import suggest_profile
 from app.core import storage
 from app.core.audit import record_audit
@@ -53,7 +53,36 @@ logger = logging.getLogger(__name__)
 
 FOLLOW_STATUSES = ("待看", "跟进中", "放弃", "已投标")
 PROFILE_MATERIAL_MAX_BYTES = 20 * 1024 * 1024
-PROFILE_MATERIAL_EXTENSIONS = {".pdf", ".docx", ".txt"}
+PROFILE_MATERIAL_EXTENSIONS = {".pdf", ".pptx", ".docx", ".txt"}
+PROFILE_MATERIAL_DOCUMENT_TYPES = {
+    "award_notice",
+    "contract",
+    "acceptance_report",
+    "company_presentation",
+    "solution",
+    "case_study",
+    "product_manual",
+    "whitepaper",
+    "qualification",
+    "other",
+}
+
+
+def infer_profile_document_type(filename: str) -> str:
+    """按文件名做保守分类；无法判断时归为其他企业资料，由通用 Prompt 处理。"""
+    name = filename.lower()
+    rules = (
+        (("验收", "竣工"), "acceptance_report"),
+        (("中标", "成交", "award"), "award_notice"),
+        (("合同", "contract"), "contract"),
+        (("资质", "证书", "认证"), "qualification"),
+        (("案例", "业绩"), "case_study"),
+        (("白皮书", "whitepaper"), "whitepaper"),
+        (("手册", "manual", "产品说明"), "product_manual"),
+        (("解决方案", "方案"), "solution"),
+        (("公司介绍", "企业介绍", "演示", "presentation"), "company_presentation"),
+    )
+    return next((kind for words, kind in rules if any(word in name for word in words)), "other")
 
 
 @router.get("/recommendations")
@@ -258,9 +287,11 @@ async def upload_profile_material(
     filename = Path(file.filename or "material").name
     suffix = Path(filename).suffix.lower()
     if suffix not in PROFILE_MATERIAL_EXTENSIONS:
-        raise HTTPException(status_code=422, detail="仅支持 PDF、DOCX、TXT 文件")
-    if document_type != "award_notice":
-        raise HTTPException(status_code=422, detail="当前版本仅支持中标/成交通知材料")
+        raise HTTPException(status_code=422, detail="仅支持 PDF、PPTX、DOCX、TXT 文件")
+    if document_type == "auto":
+        document_type = infer_profile_document_type(filename)
+    if document_type not in PROFILE_MATERIAL_DOCUMENT_TYPES:
+        raise HTTPException(status_code=422, detail="不支持的企业资料类型")
     data = await file.read(PROFILE_MATERIAL_MAX_BYTES + 1)
     if not data:
         raise HTTPException(status_code=422, detail="文件内容为空")
@@ -424,10 +455,14 @@ def confirm_profile_fact(
         if fact.status != "pending":
             raise HTTPException(status_code=409, detail="该事实已经处理")
         try:
-            value = ProjectCaseValue.model_validate(body.value or fact.value).model_dump()
-        except ValidationError as exc:
-            raise HTTPException(status_code=422, detail="案例字段不完整或格式错误") from exc
-        if value["company_role"] not in {"winner", "supplier", "consortium_member"}:
+            value = validate_fact_value(fact.fact_type, body.value or fact.value)
+        except (ValidationError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="候选事实字段不完整或格式错误") from exc
+        if fact.fact_type == "project_case" and value["company_role"] not in {
+            "winner",
+            "supplier",
+            "consortium_member",
+        }:
             raise HTTPException(
                 status_code=422,
                 detail="只有中标人、成交供应商或联合体成员可以确认为正式案例，请先修正企业角色",
@@ -436,7 +471,7 @@ def confirm_profile_fact(
         fact.status = "confirmed"
         fact.confirmed_by = current.user_id
         fact.confirmed_at = datetime.now(UTC)
-        project_confirmed_case(session, fact, value)
+        project_confirmed_fact(session, fact, value)
         record_audit(session, current, "fact.confirm", target=f"fact:{fact_id}")
     return {"ok": True, "rematch": _queue_profile_rematch(current.tenant_id)}
 
