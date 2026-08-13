@@ -43,6 +43,7 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   no_facts: { label: '未发现案例', color: 'default' },
   extract_failed: { label: '抽取失败', color: 'error' },
   needs_ocr: { label: '需要 OCR', color: 'warning' },
+  no_text: { label: '未读取到文字', color: 'warning' },
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -79,6 +80,7 @@ const FACT_LABELS: Record<string, string> = {
 };
 
 const SOURCE_LABELS: Record<string, string> = {
+  document_proof: '合同/中标佐证（旧）',
   self_declared: '企业自述',
   case_supported: '案例佐证',
   contract_proof: '合同/中标佐证',
@@ -169,6 +171,7 @@ export default function ProfileEvidencePanel({
   };
 
   const openConfirm = (fact: ProfileFactItem) => {
+    caseForm.resetFields();
     setEditing(fact);
     caseForm.setFieldsValue(fact.value);
   };
@@ -178,11 +181,13 @@ export default function ProfileEvidencePanel({
     const value = await caseForm.validateFields();
     setConfirming(true);
     try {
-      await apiFetch(`/api/profile/facts/${editing.id}/confirm`, {
+      const result = await apiFetch<{ projected: boolean }>(`/api/profile/facts/${editing.id}/confirm`, {
         method: 'POST',
         body: JSON.stringify({ value }),
       });
-      message.success('事实已确认并写入正式画像');
+      message.success(result.projected
+        ? '事实已确认并写入匹配画像'
+        : '事实已确认保存；规划能力或已有简介未改动当前匹配画像');
       setEditing(null);
       await Promise.all([load(), onProfileChanged()]);
     } catch (error) {
@@ -279,7 +284,7 @@ export default function ProfileEvidencePanel({
                   title={<Space wrap><span>{item.filename}</span><Tag color={status.color}>{status.label}</Tag></Space>}
                   description={
                     <Space direction="vertical" size={2}>
-                      <span>{DOCUMENT_TYPES.find((type) => type.value === item.document_type)?.label || item.document_type} · {formatDateTime(item.created_at)} · 已发现 {item.fact_count} 条事实</span>
+                      <span>{DOCUMENT_TYPES.find((type) => type.value === item.document_type)?.label || item.document_type}{item.source_type === 'auto_detected_document' ? '（自动识别，按企业自述计）' : ''} · {formatDateTime(item.created_at)} · 已发现 {item.fact_count} 条事实</span>
                       {item.error ? <Typography.Text type="danger">{item.error}</Typography.Text> : null}
                     </Space>
                   }

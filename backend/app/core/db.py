@@ -44,6 +44,13 @@ MIGRATIONS = [
     "ALTER TABLE announcements ADD COLUMN IF NOT EXISTS biddable BOOLEAN",
     "ALTER TABLE match_results ADD COLUMN IF NOT EXISTS score_details JSONB "
     "NOT NULL DEFAULT '{}'::jsonb",
+    # 画像事实多类型化兼容：旧案例 key 没有类型前缀，旧证据等级 document_proof 等同合同证明。
+    "UPDATE profile_facts SET canonical_key = LEFT('project_case:' || canonical_key, 256) "
+    "WHERE fact_type = 'project_case' AND canonical_key IS NOT NULL "
+    "AND canonical_key NOT LIKE 'project_case:%'",
+    "UPDATE profile_facts SET source_strength = 'contract_proof' "
+    "WHERE source_strength = 'document_proof'",
+    "ALTER TABLE profile_facts ALTER COLUMN source_strength SET DEFAULT 'contract_proof'",
     # 存量清洗（幂等）：注册时首尾空格（含全角）入库导致登录失败；已有同名去空格行则跳过防撞唯一键
     "UPDATE users SET username = btrim(username, ' 　') "
     "WHERE username <> btrim(username, ' 　') "

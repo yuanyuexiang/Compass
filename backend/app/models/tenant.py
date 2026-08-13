@@ -112,7 +112,7 @@ class ProfileFact(Base):
     canonical_key: Mapped[str | None] = mapped_column(String(256), index=True)
     value: Mapped[dict] = mapped_column(JSONB, default=dict)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
-    source_strength: Mapped[str] = mapped_column(String(32), default="document_proof")
+    source_strength: Mapped[str] = mapped_column(String(32), default="contract_proof")
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

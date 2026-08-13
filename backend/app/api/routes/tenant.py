@@ -288,7 +288,8 @@ async def upload_profile_material(
     suffix = Path(filename).suffix.lower()
     if suffix not in PROFILE_MATERIAL_EXTENSIONS:
         raise HTTPException(status_code=422, detail="仅支持 PDF、PPTX、DOCX、TXT 文件")
-    if document_type == "auto":
+    auto_detected = document_type == "auto"
+    if auto_detected:
         document_type = infer_profile_document_type(filename)
     if document_type not in PROFILE_MATERIAL_DOCUMENT_TYPES:
         raise HTTPException(status_code=422, detail="不支持的企业资料类型")
@@ -311,15 +312,19 @@ async def upload_profile_material(
     with session_scope() as session:
         material = ProfileMaterial(
             tenant_id=current.tenant_id,
-            source_type="uploaded_document",
+            source_type="auto_detected_document" if auto_detected else "uploaded_document",
             document_type=document_type,
             filename=filename,
             content_type=file.content_type,
             object_key=stored_key,
             parsed_text=parsed_text or None,
-            parse_status="needs_ocr" if needs_ocr else "parsed",
+            parse_status="needs_ocr" if needs_ocr else ("parsed" if parsed_text else "no_text"),
             needs_ocr=needs_ocr,
-            error="扫描件暂不支持 OCR，请上传可复制文字的 PDF" if needs_ocr else None,
+            error=(
+                "扫描件暂不支持 OCR，请上传可复制文字的 PDF"
+                if needs_ocr
+                else ("未从文件中读取到文字；图片中的文字暂不支持识别" if not parsed_text else None)
+            ),
         )
         session.add(material)
         session.flush()
@@ -412,14 +417,22 @@ def list_profile_facts(
             .where(ProfileFact.tenant_id == current.tenant_id, ProfileFact.status == status)
             .order_by(ProfileFact.id.desc())
         ).all()
-        out = []
-        for fact in facts:
-            evidence = session.execute(
+        evidence_by_fact = {}
+        if facts:
+            evidence_rows = session.execute(
                 select(ProfileEvidence, ProfileMaterial)
                 .join(ProfileMaterial, ProfileMaterial.id == ProfileEvidence.material_id)
-                .where(ProfileEvidence.fact_id == fact.id)
-            ).first()
-            ev, material = evidence if evidence else (None, None)
+                .where(
+                    ProfileEvidence.tenant_id == current.tenant_id,
+                    ProfileEvidence.fact_id.in_([fact.id for fact in facts]),
+                )
+                .order_by(ProfileEvidence.fact_id, ProfileEvidence.id)
+            ).all()
+            for evidence, material in evidence_rows:
+                evidence_by_fact.setdefault(evidence.fact_id, (evidence, material))
+        out = []
+        for fact in facts:
+            ev, material = evidence_by_fact.get(fact.id, (None, None))
             out.append(
                 {
                     "id": fact.id,
@@ -471,9 +484,13 @@ def confirm_profile_fact(
         fact.status = "confirmed"
         fact.confirmed_by = current.user_id
         fact.confirmed_at = datetime.now(UTC)
-        project_confirmed_fact(session, fact, value)
+        projected = project_confirmed_fact(session, fact, value)
         record_audit(session, current, "fact.confirm", target=f"fact:{fact_id}")
-    return {"ok": True, "rematch": _queue_profile_rematch(current.tenant_id)}
+    return {
+        "ok": True,
+        "projected": projected,
+        "rematch": _queue_profile_rematch(current.tenant_id) if projected else False,
+    }
 
 
 @router.post("/profile/facts/{fact_id}/reject")

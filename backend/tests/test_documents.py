@@ -1,5 +1,8 @@
+import io
+
 import fitz
 from pptx import Presentation
+from pptx.util import Inches
 
 from app.parsing.documents import parse_attachment, pdf_to_text, pptx_to_text
 
@@ -40,13 +43,17 @@ def test_pptx_keeps_slide_numbers_and_tables():
     table = slide.shapes.add_table(1, 2, 100, 100, 500, 100).table
     table.cell(0, 0).text = "能力"
     table.cell(0, 1).text = "AI 安防"
-    stream = __import__("io").BytesIO()
+    group = slide.shapes.add_group_shape()
+    grouped_box = group.shapes.add_textbox(Inches(1), Inches(2), Inches(3), Inches(1))
+    grouped_box.text = "成组文本：数据治理"
+    stream = io.BytesIO()
     presentation.save(stream)
 
     text = pptx_to_text(stream.getvalue())
     assert "[第1页]" in text
     assert "智慧园区解决方案" in text
     assert "能力 | AI 安防" in text
+    assert "成组文本：数据治理" in text
 
     dispatched, needs_ocr = parse_attachment("企业介绍.PPTX", stream.getvalue())
     assert dispatched == text

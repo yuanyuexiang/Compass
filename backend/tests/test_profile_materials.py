@@ -8,7 +8,9 @@ from app.ai.profile_materials import (
     ProjectCaseValue,
     canonical_case_key,
     evidence_page,
+    fact_confidence,
     format_case_line,
+    validate_fact_value,
 )
 from app.parsing.documents import parse_attachment
 
@@ -67,13 +69,23 @@ def test_extract_capability_facts_marks_grounded_planned_capability(monkeypatch)
     payload = {
         "facts": [
             {
-                "fact_type": "product_capability",
+                "fact_type": "model_invented_type",
+                "value": {"name": "坏类型"},
+                "evidence_quote": "未来计划推出园区能耗管理平台。",
+            },
+            {
+                "fact_type": "service_capability",
+                "value": {"description": "缺少名称", "status": "current"},
+                "evidence_quote": "未来计划推出园区能耗管理平台。",
+            },
+            {
+                "fact_type": {"value": "product_capability", "confidence": 0.9},
                 "value": {
-                    "name": "园区能耗管理平台",
+                    "name": {"value": "园区能耗管理平台"},
                     "description": "能耗管理",
                     "status": "planned",
                 },
-                "evidence_quote": "未来计划推出园区能耗管理平台。",
+                "evidence_quote": {"value": "未来计划推出园区能耗管理平台。"},
                 "evidence_page": 2,
             },
             {
@@ -91,6 +103,26 @@ def test_extract_capability_facts_marks_grounded_planned_capability(monkeypatch)
     assert facts[0].fact_type == "product_capability"
     assert facts[0].value["status"] == "planned"
     assert evidence_page(facts[0].evidence_quote, text) == 2
+
+
+def test_capability_confidence_uses_evidence_strength_not_company_role():
+    assert fact_confidence("certification", {"name": "ISO27001"}, "certificate_proof") == 0.9
+    assert fact_confidence("product_capability", {"status": "current"}, "self_declared") == 0.65
+    assert fact_confidence("product_capability", {"status": "planned"}, "acceptance_proof") == 0.35
+    assert fact_confidence("project_case", {"company_role": "candidate"}, "contract_proof") == 0.55
+
+
+def test_validate_fact_value_normalizes_wrappers_and_drops_extra_fields():
+    value = validate_fact_value(
+        "product_capability",
+        {
+            "name": {"value": "智慧园区平台"},
+            "description": {"value": "园区运营"},
+            "status": {"value": "current"},
+            "services": "错误类型不应透传",
+        },
+    )
+    assert value == {"name": "智慧园区平台", "description": "园区运营", "status": "current"}
 
 
 def test_case_normalization_and_display():

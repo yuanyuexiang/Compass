@@ -247,7 +247,8 @@ export type ProfileMaterialStatus =
   | 'extracted'
   | 'no_facts'
   | 'extract_failed'
-  | 'needs_ocr';
+  | 'needs_ocr'
+  | 'no_text';
 
 export interface ProfileMaterialItem {
   id: number;

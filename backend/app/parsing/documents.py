@@ -5,6 +5,7 @@ import io
 import fitz  # PyMuPDF
 from docx import Document
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 # 平均每页文本字符数低于此阈值判定为扫描件
 SCANNED_CHARS_PER_PAGE = 30
@@ -38,9 +39,13 @@ def pptx_to_text(data: bytes) -> str:
     """提取幻灯片正文、表格与演讲者备注，并保留可追溯的页码标记。"""
     presentation = Presentation(io.BytesIO(data))
     pages: list[str] = []
-    for page_number, slide in enumerate(presentation.slides, 1):
+
+    def shape_texts(shapes) -> list[str]:
         parts: list[str] = []
-        for shape in slide.shapes:
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                parts.extend(shape_texts(shape.shapes))
+                continue
             if getattr(shape, "has_text_frame", False):
                 text = shape.text.strip()
                 if text:
@@ -50,6 +55,10 @@ def pptx_to_text(data: bytes) -> str:
                     cells = [cell.text.strip() for cell in row.cells]
                     if any(cells):
                         parts.append(" | ".join(cells))
+        return parts
+
+    for page_number, slide in enumerate(presentation.slides, 1):
+        parts = shape_texts(slide.shapes)
         if slide.has_notes_slide:
             notes = [
                 shape.text.strip()
