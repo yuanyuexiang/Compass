@@ -471,13 +471,40 @@ export default function ProfilePage() {
                   </div>
                   {profileData ? (
                     <>
-                      <div className="profile-progress-box">
-                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>画像完成度</Typography.Text>
-                          <Typography.Text strong style={{ fontSize: 13, color: '#2f54eb' }}>{profileCompleteness(profileData).percent}%</Typography.Text>
-                        </Space>
-                        <Progress percent={profileCompleteness(profileData).percent} showInfo={false} size="small" strokeColor={{ from: '#2f54eb', to: '#6e8bff' }} />
-                      </div>
+                      {(() => {
+                        const { percent, missing } = profileCompleteness(profileData);
+                        return (
+                          <div className="profile-progress-box">
+                            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>画像完成度</Typography.Text>
+                              <Typography.Text strong style={{ fontSize: 13, color: '#2f54eb' }}>{percent}%</Typography.Text>
+                            </Space>
+                            <Progress percent={percent} showInfo={false} size="small" strokeColor={{ from: '#2f54eb', to: '#6e8bff' }} />
+                            {missing.length ? (
+                              <div style={{ marginTop: 8 }}>
+                                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 5 }}>
+                                  还缺少 {missing.length} 项：
+                                </Typography.Text>
+                                <Space size={[4, 4]} wrap>
+                                  {missing.map((item) => <Tag key={item} color="orange" style={{ marginInlineEnd: 0 }}>{item}</Tag>)}
+                                </Space>
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  style={{ height: 'auto', padding: '6px 0 0', fontSize: 12 }}
+                                  onClick={() => setImproveOpen(true)}
+                                >
+                                  补充这些内容
+                                </Button>
+                              </div>
+                            ) : (
+                              <Typography.Text type="success" style={{ display: 'block', marginTop: 6, fontSize: 12 }}>
+                                关键画像信息已完善
+                              </Typography.Text>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                         {profileData.updated_at ? `更新于 ${formatDateTime(profileData.updated_at)}` : '尚未保存画像'}
                       </Typography.Text>
