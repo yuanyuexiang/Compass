@@ -489,12 +489,14 @@ export default function ProfilePage() {
                                   {missing.map((item) => <Tag key={item} color="orange" style={{ marginInlineEnd: 0 }}>{item}</Tag>)}
                                 </Space>
                                 <Button
-                                  type="link"
+                                  type="primary"
                                   size="small"
-                                  style={{ height: 'auto', padding: '6px 0 0', fontSize: 12 }}
+                                  block
+                                  icon={<PlusOutlined />}
+                                  style={{ marginTop: 10 }}
                                   onClick={() => setImproveOpen(true)}
                                 >
-                                  补充这些内容
+                                  去完善画像
                                 </Button>
                               </div>
                             ) : (
@@ -505,14 +507,8 @@ export default function ProfilePage() {
                           </div>
                         );
                       })()}
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        {profileData.updated_at ? `更新于 ${formatDateTime(profileData.updated_at)}` : '尚未保存画像'}
-                      </Typography.Text>
                     </>
                   ) : null}
-                  <Button type="primary" block icon={<PlusOutlined />} onClick={() => setImproveOpen(true)}>
-                    完善画像
-                  </Button>
                 </Space>
               </div>
               <Menu
@@ -546,9 +542,14 @@ export default function ProfilePage() {
                 ]}
               />
               <div style={{ padding: '12px 20px 18px', borderTop: '1px solid #f5f5f5' }}>
-                <Typography.Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
-                  已确认的信息才参与商机匹配，材料原件不会直接改变画像。
-                </Typography.Text>
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {profileData?.updated_at ? `更新于 ${formatDateTime(profileData.updated_at)}` : '尚未保存画像'}
+                  </Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
+                    仅已确认内容参与商机匹配。
+                  </Typography.Text>
+                </Space>
               </div>
             </Card>
           </Col>
