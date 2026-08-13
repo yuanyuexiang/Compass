@@ -105,15 +105,40 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          cat >> ~/.ssh/config <<'EOF'
+          Host compass-deploy
+            HostName ${{ secrets.DEPLOY_HOST }}
+            User ${{ secrets.DEPLOY_USER }}
+            IdentityFile ~/.ssh/deploy_key
+            ServerAliveInterval 15
+            ServerAliveCountMax 12
+            TCPKeepAlive yes
+            ConnectTimeout 20
+          EOF
+          chmod 600 ~/.ssh/config
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
       - name: 同步部署文件
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" 'mkdir -p /opt/compass'
-          scp -i ~/.ssh/deploy_key deploy/docker-compose.prod.yml deploy/.env.production.example \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/compass/"
+          ssh compass-deploy 'mkdir -p /opt/compass'
+          scp deploy/docker-compose.prod.yml deploy/.env.production.example \
+            compass-deploy:/opt/compass/
       - name: 执行部署
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "REGISTRY='${{ env.REGISTRY }}' NAMESPACE='${{ env.NAMESPACE }}' TAG='${{ github.sha }}' \
-             REGISTRY_USERNAME='${{ secrets.REGISTRY_USERNAME }}' REGISTRY_PASSWORD='${{ secrets.REGISTRY_PASSWORD }}' \
-             bash -s" < deploy/deploy.sh
+          for attempt in 1 2 3; do
+            echo "部署尝试 ${attempt}/3"
+            set +e
+            ssh compass-deploy \
+              "REGISTRY='${{ env.REGISTRY }}' NAMESPACE='${{ env.NAMESPACE }}' TAG='${{ github.sha }}' \
+               REGISTRY_USERNAME='${{ secrets.REGISTRY_USERNAME }}' REGISTRY_PASSWORD='${{ secrets.REGISTRY_PASSWORD }}' \
+               bash -s" < deploy/deploy.sh
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            if [ "$status" -ne 255 ] || [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            echo "SSH 连接中断，10 秒后重连；Docker 将复用已下载的镜像层。"
+            sleep 10
+          done
