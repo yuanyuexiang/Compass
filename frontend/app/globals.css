@@ -732,6 +732,19 @@ a {
     overflow-y: auto;
     scrollbar-gutter: stable;
   }
+
+  .notification-detail-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .list-detail-layout .notification-detail-stack > .opportunity-detail {
+    flex: 1 1 auto;
+    height: auto;
+  }
 }
 
 /* ===== 流水线分段条 ===== */

@@ -171,7 +171,7 @@ export default function NotificationsPage() {
         </Col>
         <Col xs={24} lg={15} xl={16}>
           {activeAnnouncementId ? (
-            <Space direction="vertical" size={10} style={{ width: '100%', height: '100%' }}>
+            <div className="notification-detail-stack">
               {selectedOpportunities.length > 1 ? (
                 <Select
                   style={{ width: '100%' }}
@@ -188,7 +188,7 @@ export default function NotificationsPage() {
                 key={`${selected?.id}-${activeAnnouncementId}`}
                 id={activeAnnouncementId}
               />
-            </Space>
+            </div>
           ) : (
             <Card key={selected?.id ?? 'empty'} className="compass-card opportunity-detail">
               <Empty description={selected ? '这是一条系统通知，没有关联商机' : '从左侧选择一条通知'} />
