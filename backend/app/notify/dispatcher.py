@@ -76,7 +76,14 @@ def dispatch_daily_digest(session: Session, tenant_id: int) -> None:
         ann = session.get(Announcement, project.announcement_id)
         lines.append(f"{'★' * m.star} [{m.match_score:.0f}分] {ann.title[:45]}")
     title = f"商机日报：今日推荐 {len(matches)} 条"
-    _deliver(session, tenant_id, title, "\n".join(lines), sub.channels or {})
+    _deliver(
+        session,
+        tenant_id,
+        title,
+        "\n".join(lines),
+        sub.channels or {},
+        related_match_ids=[m.id for m in matches],
+    )
 
 
 def _deliver(
@@ -86,13 +93,14 @@ def _deliver(
     body: str,
     channels: dict,
     related_match_id: int | None = None,
+    related_match_ids: list[int] | None = None,
 ) -> None:
     from app.notify.channels import CHANNELS
 
     session.add(
         Notification(
             tenant_id=tenant_id, channel="web", title=title, body=body,
-            related_match_id=related_match_id,
+            related_match_id=related_match_id, related_match_ids=related_match_ids or [],
         )
     )
     for name, sender in CHANNELS.items():
@@ -108,6 +116,7 @@ def _deliver(
         session.add(
             Notification(
                 tenant_id=tenant_id, channel=name, title=title, body="",
-                related_match_id=related_match_id, read=True, status=status,
+                related_match_id=related_match_id, related_match_ids=related_match_ids or [],
+                read=True, status=status,
             )
         )

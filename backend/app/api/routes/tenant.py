@@ -1,14 +1,14 @@
 """租户层接口：推荐、跟进、画像、订阅、通知、NL 搜索。全部按 tenant_id 强制隔离。"""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import delete, func, select
 
 from app.ai import websearch
 from app.ai.llm_config import friendly_llm_error
@@ -595,28 +595,77 @@ def list_notifications(
     limit: int = Query(default=50, le=200), current: CurrentUser = CurrentUserDep
 ) -> list[dict]:
     with session_scope() as session:
-        rows = session.execute(
-            select(Notification, Project.announcement_id)
-            .outerjoin(
-                MatchResult,
-                and_(
-                    MatchResult.id == Notification.related_match_id,
-                    MatchResult.tenant_id == current.tenant_id,
-                ),
-            )
-            .outerjoin(Project, Project.id == MatchResult.project_id)
+        notifications = session.scalars(
+            select(Notification)
             .where(Notification.tenant_id == current.tenant_id, Notification.channel == "web")
             .order_by(Notification.id.desc())
             .limit(limit)
         ).all()
-        return [
-            {
-                "id": n.id, "title": n.title, "body": n.body,
-                "read": n.read, "created_at": n.created_at,
-                "announcement_id": announcement_id,
+
+        # 旧版日报没有保存关联 ID；按当时生成日报的同一时间窗口和排序规则恢复。
+        legacy_digest_match_ids: dict[int, list[int]] = {}
+        for notification in notifications:
+            if (
+                notification.related_match_id is None
+                and not notification.related_match_ids
+                and notification.title.startswith("商机日报：")
+            ):
+                legacy_digest_match_ids[notification.id] = list(session.scalars(
+                    select(MatchResult.id)
+                    .where(
+                        MatchResult.tenant_id == current.tenant_id,
+                        MatchResult.created_at >= notification.created_at - timedelta(days=1),
+                        MatchResult.created_at <= notification.created_at,
+                        MatchResult.star >= 3,
+                    )
+                    .order_by(MatchResult.star.desc(), MatchResult.match_score.desc())
+                    .limit(20)
+                ).all())
+        match_ids = {
+            match_id
+            for notification in notifications
+            for match_id in (
+                [notification.related_match_id]
+                + (notification.related_match_ids or [])
+                + legacy_digest_match_ids.get(notification.id, [])
+            )
+            if match_id is not None
+        }
+        opportunity_by_match_id = {}
+        if match_ids:
+            opportunities = session.execute(
+                select(MatchResult.id, Project.announcement_id, Announcement.title)
+                .join(Project, Project.id == MatchResult.project_id)
+                .join(Announcement, Announcement.id == Project.announcement_id)
+                .where(
+                    MatchResult.tenant_id == current.tenant_id,
+                    MatchResult.id.in_(match_ids),
+                )
+            ).all()
+            opportunity_by_match_id = {
+                match_id: {"announcement_id": announcement_id, "title": title}
+                for match_id, announcement_id, title in opportunities
             }
-            for n, announcement_id in rows
-        ]
+
+        def related_opportunities(notification: Notification) -> list[dict]:
+            ids = notification.related_match_ids or legacy_digest_match_ids.get(notification.id, [])
+            if not ids and notification.related_match_id is not None:
+                ids = [notification.related_match_id]
+            return [opportunity_by_match_id[mid] for mid in ids if mid in opportunity_by_match_id]
+
+        result = []
+        for notification in notifications:
+            linked = related_opportunities(notification)
+            result.append({
+                "id": notification.id,
+                "title": notification.title,
+                "body": notification.body,
+                "read": notification.read,
+                "created_at": notification.created_at,
+                "announcement_id": linked[0]["announcement_id"] if linked else None,
+                "opportunities": linked,
+            })
+        return result
 
 
 @router.post("/notifications/{notification_id}/read")

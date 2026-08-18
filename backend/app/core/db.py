@@ -44,6 +44,8 @@ MIGRATIONS = [
     "ALTER TABLE announcements ADD COLUMN IF NOT EXISTS biddable BOOLEAN",
     "ALTER TABLE match_results ADD COLUMN IF NOT EXISTS score_details JSONB "
     "NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS related_match_ids JSONB "
+    "NOT NULL DEFAULT '[]'::jsonb",
     # 画像事实多类型化兼容：旧案例 key 没有类型前缀，旧证据等级 document_proof 等同合同证明。
     "UPDATE profile_facts SET canonical_key = LEFT('project_case:' || canonical_key, 256) "
     "WHERE fact_type = 'project_case' AND canonical_key IS NOT NULL "

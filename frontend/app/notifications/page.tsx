@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, App, Button, Card, Col, Empty, List, Popconfirm, Row, Segmented, Skeleton, Space, Typography } from 'antd';
+import {
+  Alert, App, Button, Card, Col, Empty, List, Popconfirm, Row, Segmented, Select,
+  Skeleton, Space, Typography,
+} from 'antd';
 import { BellFilled, ClockCircleOutlined, DeleteOutlined, ProjectOutlined } from '@ant-design/icons';
 import AppLayout from '@/components/AppLayout';
 import OpportunityDetailPanel from '@/components/OpportunityDetailPanel';
@@ -16,6 +19,7 @@ export default function NotificationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | string | null>(null);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<number | string | null>(null);
 
   useEffect(() => {
     apiFetch<NotificationItem[]>('/api/notifications?limit=100')
@@ -61,6 +65,12 @@ export default function NotificationsPage() {
 
   const visibleItems = filter === 'unread' ? items.filter((item) => !item.read) : items;
   const selected = items.find((item) => String(item.id) === String(selectedId)) ?? null;
+  const selectedOpportunities = selected?.opportunities ?? [];
+  const activeAnnouncementId = selectedOpportunities.some(
+    (item) => String(item.announcement_id) === String(selectedAnnouncementId),
+  )
+    ? selectedAnnouncementId
+    : selectedOpportunities[0]?.announcement_id ?? selected?.announcement_id ?? null;
 
   return (
     <AppLayout title="通知中心" subtitle="推荐商机与系统消息，点击未读项标记为已读">
@@ -99,6 +109,9 @@ export default function NotificationsPage() {
                 className={`notification-row${item.read ? '' : ' notification-row-unread'}${String(item.id) === String(selectedId) ? ' notification-row-active' : ''}`}
                 onClick={() => {
                   setSelectedId(item.id);
+                  setSelectedAnnouncementId(
+                    item.opportunities?.[0]?.announcement_id ?? item.announcement_id,
+                  );
                   void markRead(item);
                 }}
                 extra={
@@ -157,8 +170,25 @@ export default function NotificationsPage() {
       </Card>
         </Col>
         <Col xs={24} lg={15} xl={16}>
-          {selected?.announcement_id ? (
-            <OpportunityDetailPanel key={selected.id} id={selected.announcement_id} />
+          {activeAnnouncementId ? (
+            <Space direction="vertical" size={10} style={{ width: '100%', height: '100%' }}>
+              {selectedOpportunities.length > 1 ? (
+                <Select
+                  style={{ width: '100%' }}
+                  value={activeAnnouncementId}
+                  onChange={setSelectedAnnouncementId}
+                  options={selectedOpportunities.map((item, index) => ({
+                    value: item.announcement_id,
+                    label: `${index + 1}. ${item.title}`,
+                  }))}
+                  aria-label="选择日报中的商机"
+                />
+              ) : null}
+              <OpportunityDetailPanel
+                key={`${selected?.id}-${activeAnnouncementId}`}
+                id={activeAnnouncementId}
+              />
+            </Space>
           ) : (
             <Card key={selected?.id ?? 'empty'} className="compass-card opportunity-detail">
               <Empty description={selected ? '这是一条系统通知，没有关联商机' : '从左侧选择一条通知'} />

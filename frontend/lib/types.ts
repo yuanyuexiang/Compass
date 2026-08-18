@@ -342,6 +342,10 @@ export interface NotificationItem {
   read: boolean;
   created_at: string;
   announcement_id: number | string | null;
+  opportunities: Array<{
+    announcement_id: number | string;
+    title: string;
+  }>;
 }
 
 export interface AuditLogItem {

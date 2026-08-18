@@ -196,6 +196,8 @@ class Notification(Base):
     title: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text, default="")
     related_match_id: Mapped[int | None] = mapped_column(BigInteger)
+    # 日报会同时关联多条匹配；保留 related_match_id 兼容既有即时通知。
+    related_match_ids: Mapped[list] = mapped_column(JSONB, default=list)
     read: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(16), default="sent")  # sent/failed
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
